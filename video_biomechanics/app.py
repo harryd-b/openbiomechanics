@@ -1,0 +1,1986 @@
+"""
+Web application for video biomechanics analysis.
+
+Upload 1-2 videos and get UPLIFT-style biomechanics visualization.
+
+Run with:
+    python app.py
+
+Then open http://localhost:8050 in your browser.
+"""
+
+import os
+import base64
+import tempfile
+from pathlib import Path
+from typing import Optional
+import uuid
+
+import numpy as np
+import pandas as pd
+
+from dash import Dash, html, dcc, callback, Output, Input, State, ctx
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# Import our modules
+from multiview import MultiViewPipeline, process_multiview
+from dashboard import (
+    create_skeleton_figure,
+    create_kinematic_sequence_figure,
+    create_xfactor_figure,
+    create_joint_angle_figure,
+    SKELETON_CONNECTIONS
+)
+
+
+# Font Awesome for icons
+FA_CDN = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+
+# Initialize app
+app = Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.DARKLY, FA_CDN],
+    suppress_callback_exceptions=True
+)
+
+# Storage for processing results
+RESULTS_CACHE = {}
+UPLOAD_DIR = tempfile.mkdtemp()
+
+
+def create_upload_card(camera_num: int):
+    """Create an upload card for a camera with video preview."""
+    label = "PRIMARY" if camera_num == 1 else "SECONDARY"
+    return html.Div([
+        html.Div(label, className="section-title mb-2"),
+        html.Div([
+            # Upload zone (shown when no video)
+            html.Div(id=f'upload-zone-{camera_num}', children=[
+                dcc.Upload(
+                    id=f'upload-video-{camera_num}',
+                    children=html.Div([
+                        html.I(className="fas fa-cloud-upload-alt",
+                               style={'fontSize': '2.5rem', 'color': '#444', 'marginBottom': '12px'}),
+                        html.Div("Drop video here", style={'color': '#666', 'fontSize': '0.9rem', 'marginBottom': '4px'}),
+                        html.Div([
+                            "or ",
+                            html.Span("browse", style={'color': '#00d4aa', 'cursor': 'pointer'})
+                        ], style={'color': '#555', 'fontSize': '0.85rem'})
+                    ], style={'textAlign': 'center'}),
+                    style={
+                        'width': '100%',
+                        'borderWidth': '2px',
+                        'borderStyle': 'dashed',
+                        'borderRadius': '10px',
+                        'borderColor': '#333',
+                        'padding': '40px 20px',
+                        'cursor': 'pointer',
+                        'minHeight': '180px',
+                        'display': 'flex',
+                        'alignItems': 'center',
+                        'justifyContent': 'center',
+                        'backgroundColor': 'rgba(30,30,48,0.5)',
+                        'transition': 'all 0.2s ease'
+                    },
+                    multiple=False,
+                    accept='video/*'
+                ),
+            ]),
+            # Video preview (shown when video uploaded)
+            html.Div(id=f'video-preview-{camera_num}', style={'display': 'none'}, children=[
+                html.Div([
+                    html.Video(
+                        id=f'preview-player-{camera_num}',
+                        controls=True,
+                        style={'width': '100%', 'borderRadius': '8px', 'backgroundColor': '#000'}
+                    ),
+                    # Video controls bar
+                    html.Div([
+                        html.Button([
+                            html.I(className="fas fa-expand", id=f'fullscreen-icon-{camera_num}')
+                        ], id=f'fullscreen-btn-{camera_num}', className="video-control-btn", title="Fullscreen"),
+                        html.Button([
+                            html.I(className="fas fa-download")
+                        ], id=f'download-btn-{camera_num}', className="video-control-btn", title="Download"),
+                        html.Button([
+                            html.I(className="fas fa-trash-alt")
+                        ], id=f'remove-btn-{camera_num}', className="video-control-btn", title="Remove"),
+                    ], className="video-controls-bar"),
+                ], className="video-preview-wrapper"),
+            ]),
+            html.Div(id=f'upload-status-{camera_num}', className="mt-3 text-center",
+                     style={'minHeight': '24px'})
+        ], className="glass-card", style={'padding': '20px'})
+    ])
+
+
+# Custom CSS for professional UPLIFT-style interface
+CUSTOM_CSS = """
+/* Global typography */
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+/* Main container */
+.main-container { background: linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%); }
+
+/* Cards with glass-morphism effect */
+.glass-card {
+    background: linear-gradient(145deg, rgba(30,30,48,0.9) 0%, rgba(37,37,64,0.8) 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+/* Section titles */
+.section-title {
+    color: #888;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+/* Metric values - teal/cyan accent */
+.metric-value {
+    color: #00d4aa;
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.metric-value-lg {
+    color: #00d4aa;
+    font-size: 2.2rem;
+    font-weight: 700;
+}
+.metric-label {
+    color: #666;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.metric-unit { color: #00d4aa; font-size: 0.9rem; }
+
+/* Session header */
+.session-header {
+    background: transparent;
+    padding: 16px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    margin-bottom: 24px;
+}
+.session-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #fff;
+}
+.session-subtitle { color: #666; font-size: 0.85rem; }
+
+/* Badge styles */
+.badge-analyzed {
+    background: rgba(26,71,42,0.8);
+    color: #4ade80;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    border: 1px solid rgba(74,222,128,0.2);
+}
+
+/* Visualize button - prominent red */
+.btn-visualize {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    border: none;
+    padding: 10px 28px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(220,38,38,0.3);
+    transition: all 0.2s ease;
+}
+.btn-visualize:hover {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(220,38,38,0.4);
+}
+
+/* Video containers */
+.video-container {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    aspect-ratio: 16/9;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.video-label {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.7);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    color: #aaa;
+}
+
+/* Energy leak indicators */
+.leak-row { padding: 6px 0; }
+.leak-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 10px;
+    box-shadow: 0 0 8px currentColor;
+}
+.leak-good { background: #4ade80; color: #4ade80; }
+.leak-bad { background: #f87171; color: #f87171; }
+.leak-text { color: #aaa; font-size: 0.85rem; }
+
+/* Sidebar sections */
+.sidebar-card {
+    background: linear-gradient(145deg, rgba(25,25,40,0.95) 0%, rgba(30,30,50,0.9) 100%);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.sidebar-label { color: #555; font-size: 0.7rem; text-transform: uppercase; }
+.sidebar-value { color: #ccc; font-size: 0.9rem; }
+
+/* Info rows */
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.info-row:last-child { border-bottom: none; }
+.info-label { color: #666; font-size: 0.85rem; }
+.info-value { color: #fff; font-size: 0.85rem; font-weight: 500; }
+.info-value-accent { color: #00d4aa; font-size: 0.85rem; font-weight: 600; }
+
+/* Tab styling */
+.nav-tabs { border-bottom: 1px solid rgba(255,255,255,0.1); }
+.nav-tabs .nav-link {
+    color: #666;
+    border: none;
+    padding: 12px 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+.nav-tabs .nav-link.active {
+    color: #fff;
+    background: transparent;
+    border-bottom: 2px solid #00d4aa;
+}
+.nav-tabs .nav-link:hover { color: #aaa; }
+
+/* Timeline slider */
+.rc-slider-track { background: #00d4aa; }
+.rc-slider-handle { border-color: #00d4aa; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #1a1a2e; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* Upload cards */
+.upload-card {
+    background: linear-gradient(145deg, #1e1e30 0%, #252540 100%);
+    border: 2px dashed #333;
+    border-radius: 12px;
+    transition: all 0.2s ease;
+}
+.upload-card:hover { border-color: #00d4aa; }
+
+/* Process button */
+.btn-process {
+    background: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+    border: none;
+    font-weight: 600;
+    padding: 12px 32px;
+    border-radius: 8px;
+    color: #000;
+}
+.btn-process:hover {
+    background: linear-gradient(135deg, #00e4ba 0%, #00c8a4 100%);
+    color: #000;
+}
+.btn-process:disabled {
+    background: #333;
+    color: #666;
+}
+
+/* Video preview */
+.video-preview-wrapper {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+}
+.video-controls-bar {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(0,0,0,0.7);
+    justify-content: flex-end;
+}
+.video-control-btn {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.video-control-btn:hover {
+    background: rgba(0,212,170,0.3);
+    border-color: #00d4aa;
+}
+
+/* Loading spinner */
+.processing-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(0,212,170,0.3);
+    border-radius: 50%;
+    border-top-color: #00d4aa;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Progress bar */
+.progress-container {
+    background: rgba(30,30,48,0.9);
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+.progress-bar-custom {
+    height: 6px;
+    background: #222;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00d4aa 0%, #00e4ba 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* Narrow upload container */
+.upload-container {
+    max-width: 700px;
+    margin: 0 auto;
+}
+"""
+
+# Inject custom CSS via index_string
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>''' + CUSTOM_CSS + '''</style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
+# Layout
+app.layout = dbc.Container([
+
+    # ===== UPLOAD PAGE =====
+    html.Div(id='upload-page', children=[
+        html.Div([  # Centered narrow container
+            # Professional header
+            html.Div([
+                html.H1("Video Biomechanics", style={
+                    'fontSize': '2rem', 'fontWeight': '700', 'color': '#fff',
+                    'marginBottom': '8px', 'textAlign': 'center'
+                }),
+                html.P("Upload videos to analyze baseball swing mechanics", style={
+                    'color': '#666', 'fontSize': '0.95rem', 'textAlign': 'center', 'marginBottom': '32px'
+                })
+            ], style={'paddingTop': '24px'}),
+
+            # Upload cards
+            html.Div("VIDEO UPLOAD", className="section-title"),
+            dbc.Row([
+                dbc.Col([
+                    create_upload_card(1)
+                ], width=6, className="mb-4"),
+                dbc.Col([
+                    create_upload_card(2)
+                ], width=6, className="mb-4"),
+            ]),
+
+            # Settings section (hidden until video uploaded)
+            html.Div(id='settings-section', style={'display': 'none'}, children=[
+                html.Div("SETTINGS", className="section-title mt-2"),
+                html.Div([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div("BATTING SIDE", className="metric-label mb-2"),
+                            dbc.RadioItems(
+                                id='bats-selector',
+                                options=[
+                                    {'label': ' Right', 'value': 'R'},
+                                    {'label': ' Left', 'value': 'L'}
+                                ],
+                                value='R',
+                                inline=True,
+                                className="text-light"
+                            )
+                        ], width=3),
+                        dbc.Col([
+                            html.Div("CAMERA ANGLE", className="metric-label mb-2"),
+                            dbc.Input(
+                                id='camera-angle',
+                                type='number',
+                                value=90,
+                                min=30,
+                                max=180,
+                                step=5,
+                                style={'backgroundColor': '#1a1a2e', 'border': '1px solid #333',
+                                       'color': '#fff', 'borderRadius': '6px'}
+                            ),
+                            html.Div("Angle between cameras (°)", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=3),
+                        dbc.Col([
+                            html.Div("PRIMARY DISTANCE", className="metric-label mb-2"),
+                            dbc.Input(
+                                id='camera-dist-1',
+                                type='number',
+                                value=2.9,
+                                min=1,
+                                max=10,
+                                step=0.1,
+                                style={'backgroundColor': '#1a1a2e', 'border': '1px solid #333',
+                                       'color': '#fff', 'borderRadius': '6px'}
+                            ),
+                            html.Div("Distance in meters", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=3),
+                        dbc.Col([
+                            html.Div("SECONDARY DISTANCE", className="metric-label mb-2"),
+                            dbc.Input(
+                                id='camera-dist-2',
+                                type='number',
+                                value=2.3,
+                                min=1,
+                                max=10,
+                                step=0.1,
+                                style={'backgroundColor': '#1a1a2e', 'border': '1px solid #333',
+                                       'color': '#fff', 'borderRadius': '6px'}
+                            ),
+                            html.Div("Distance in meters", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=3),
+                    ], className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                "Process Videos",
+                                id='process-btn',
+                                className="btn-process w-100",
+                                disabled=True
+                            )
+                        ], width=12)
+                    ])
+                ], className="glass-card", style={'padding': '20px'}),
+            ]),
+
+            # Processing status (shown during processing)
+            html.Div(id='processing-container', style={'display': 'none'}, children=[
+                html.Div([
+                    html.Div([
+                        html.Div(className="processing-spinner"),
+                        html.Span("Processing videos...", style={'color': '#00d4aa', 'fontSize': '1rem'})
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '16px'}),
+                    html.Div([
+                        html.Div(id='progress-bar-fill', className="progress-bar-fill", style={'width': '0%'})
+                    ], className="progress-bar-custom"),
+                    html.Div(id='processing-status', className="text-center mt-3", style={'color': '#666', 'fontSize': '0.85rem'})
+                ], className="progress-container")
+            ]),
+
+            # Hidden progress bar for compatibility
+            dbc.Progress(id='progress-bar', value=0, style={'display': 'none'}),
+        ], className="upload-container"),
+    ]),  # End of upload-page
+
+    # Results section (hidden until processing complete)
+    html.Div(id='results-section', style={'display': 'none'}, children=[
+
+        # ===== SUMMARY PAGE (UPLIFT-style) =====
+        html.Div(id='summary-page', children=[
+            # Session header
+            html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        html.H4(id='session-title', className="session-title mb-1"),
+                        html.Span(id='capture-time', className="session-subtitle")
+                    ], width=6),
+                    dbc.Col([
+                        html.Span("ANALYZED", className="badge-analyzed me-3"),
+                        dbc.Button("Visualize", id='visualize-btn', className="btn-visualize")
+                    ], width=6, className="text-end d-flex align-items-center justify-content-end")
+                ])
+            ], className="session-header"),
+
+            dbc.Row([
+                # Left column - Main content
+                dbc.Col([
+                    # Videos section
+                    html.Div("VIDEOS", className="section-title"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div([
+                                html.Video(
+                                    id='video-player-1',
+                                    controls=True,
+                                    style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
+                                ),
+                                html.Div("PRIMARY", className="video-label")
+                            ], className="video-container", id='video-thumb-1'),
+                        ], width=6),
+                        dbc.Col([
+                            html.Div([
+                                html.Video(
+                                    id='video-player-2',
+                                    controls=True,
+                                    style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
+                                ),
+                                html.Div("SECONDARY", className="video-label")
+                            ], className="video-container", id='video-thumb-2'),
+                        ], width=6),
+                    ], className="mb-4"),
+
+                    # Movement Metrics section
+                    html.Div("MOVEMENT METRICS", className="section-title"),
+                    dbc.Row([
+                        # Kinematic Sequence card
+                        dbc.Col([
+                            html.Div([
+                                html.Div("KINEMATIC SEQUENCE", className="section-title"),
+                                html.Div([
+                                    html.Span(id='kin-seq-order', className="metric-value"),
+                                ], className="mb-3"),
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Div("PELVIS", className="metric-label"),
+                                        html.Div(id='peak-pelvis-vel', className="metric-value", style={'fontSize': '1.4rem'})
+                                    ], width=4, className="text-center"),
+                                    dbc.Col([
+                                        html.Div("TRUNK", className="metric-label"),
+                                        html.Div(id='peak-trunk-vel', className="metric-value", style={'fontSize': '1.4rem'})
+                                    ], width=4, className="text-center"),
+                                    dbc.Col([
+                                        html.Div("ARM", className="metric-label"),
+                                        html.Div(id='peak-arm-vel', className="metric-value", style={'fontSize': '1.4rem'})
+                                    ], width=4, className="text-center"),
+                                ], className="mb-3"),
+                                html.Div([
+                                    html.Span("Speed Gain (Pelvis→Trunk)", className="info-label"),
+                                    html.Span(id='speed-gain', className="info-value-accent")
+                                ], className="info-row")
+                            ], className="glass-card", style={'padding': '20px'})
+                        ], width=6, className="mb-3"),
+
+                        # X-Factor card
+                        dbc.Col([
+                            html.Div([
+                                html.Div("X-FACTOR", className="section-title"),
+                                html.Div([
+                                    html.Span("Peak", className="info-label"),
+                                    html.Span(id='xfactor-peak', className="info-value-accent")
+                                ], className="info-row"),
+                                html.Div([
+                                    html.Span("At Foot Plant", className="info-label"),
+                                    html.Span(id='xfactor-fp', className="info-value")
+                                ], className="info-row"),
+                                html.Div([
+                                    html.Span("At Contact", className="info-label"),
+                                    html.Span(id='xfactor-contact', className="info-value")
+                                ], className="info-row"),
+                                html.Div([
+                                    html.Span("Trunk Flexion at Contact", className="info-label"),
+                                    html.Span(id='trunk-flexion', className="info-value")
+                                ], className="info-row")
+                            ], className="glass-card", style={'padding': '20px', 'height': '100%'})
+                        ], width=6, className="mb-3"),
+                    ]),
+
+                    # Energy Leaks card
+                    html.Div([
+                        html.Div("ENERGY LEAKS", className="section-title"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Span(className="leak-dot leak-good", id='leak-sway'),
+                                    html.Span("Sway", className="leak-text")
+                                ], className="leak-row"),
+                                html.Div([
+                                    html.Span(className="leak-dot leak-good", id='leak-hip-hike'),
+                                    html.Span("Hip Hike", className="leak-text")
+                                ], className="leak-row"),
+                                html.Div([
+                                    html.Span(className="leak-dot leak-bad", id='leak-drift'),
+                                    html.Span("Drifting Forward", className="leak-text")
+                                ], className="leak-row"),
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.Span(className="leak-dot leak-good", id='leak-knee'),
+                                    html.Span("Knee Dominance", className="leak-text")
+                                ], className="leak-row"),
+                                html.Div([
+                                    html.Span(className="leak-dot leak-good", id='leak-early-ext'),
+                                    html.Span("Coming Out of Swing", className="leak-text")
+                                ], className="leak-row"),
+                            ], width=6),
+                        ])
+                    ], className="glass-card", style={'padding': '20px'}),
+
+                ], width=8),
+
+                # Right sidebar
+                dbc.Col([
+                    # Session Details card
+                    html.Div([
+                        html.Div("SESSION DETAILS", className="section-title"),
+                        html.Div([
+                            html.Span("Activity", className="info-label"),
+                            html.Span("Baseball", className="info-value")
+                        ], className="info-row"),
+                        html.Div([
+                            html.Span("Movement", className="info-label"),
+                            html.Span("Hitting", className="info-value")
+                        ], className="info-row"),
+                        html.Div([
+                            html.Span("Handedness", className="info-label"),
+                            html.Span(id='handedness-display', className="info-value")
+                        ], className="info-row"),
+                    ], className="sidebar-card"),
+
+                    # Capture Info card
+                    html.Div([
+                        html.Div("CAPTURE INFO", className="section-title"),
+                        html.Div([
+                            html.Span("Frames", className="info-label"),
+                            html.Span(id='frame-count', className="info-value-accent")
+                        ], className="info-row"),
+                        html.Div([
+                            html.Span("Frame Rate", className="info-label"),
+                            html.Span(id='fps-display', className="info-value-accent")
+                        ], className="info-row"),
+                        html.Div([
+                            html.Span("Cameras", className="info-label"),
+                            html.Span(id='camera-count', className="info-value")
+                        ], className="info-row"),
+                    ], className="sidebar-card"),
+
+                    # Quality Assurance card
+                    html.Div([
+                        html.Div("QUALITY", className="section-title"),
+                        html.Div([
+                            html.Span("Pose Detection", className="info-label"),
+                            html.Span("High", className="info-value", style={'color': '#4ade80'})
+                        ], className="info-row"),
+                        html.Div([
+                            html.Span("Calibration", className="info-label"),
+                            html.Span("Good", className="info-value", style={'color': '#4ade80'})
+                        ], className="info-row"),
+                    ], className="sidebar-card"),
+
+                    # Export buttons
+                    html.Div([
+                        dbc.Button("Export CSV", id='export-csv-btn', color="secondary",
+                                   outline=True, className="w-100 mb-2", size="sm"),
+                        dbc.Button("Export Report", id='export-report-btn', color="secondary",
+                                   outline=True, className="w-100", size="sm"),
+                    ]),
+
+                ], width=4),
+            ]),
+        ]),
+
+        # ===== VISUALIZATION PAGE =====
+        html.Div(id='visualization-page', style={'display': 'none'}, children=[
+            # Back button and header
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button("← Back to Summary", id='back-to-summary-btn', color="link", className="ps-0")
+                ], width=6),
+                dbc.Col([
+                    html.H5("Visualization", className="text-end mb-0")
+                ], width=6)
+            ], className="mb-3"),
+
+            # Tabs for different views
+            dbc.Tabs([
+                dbc.Tab(label="Analytics", tab_id="tab-analytics"),
+                dbc.Tab(label="Pelvis", tab_id="tab-pelvis"),
+                dbc.Tab(label="Torso", tab_id="tab-torso"),
+                dbc.Tab(label="Arms", tab_id="tab-arms"),
+                dbc.Tab(label="Legs", tab_id="tab-legs"),
+                dbc.Tab(label="Advanced", tab_id="tab-advanced"),
+            ], id="analysis-tabs", active_tab="tab-analytics", className="mb-4"),
+
+            # Tab content
+            html.Div(id='tab-content'),
+
+            # Timeline with playback controls
+            html.Div([
+                # Time display
+                html.Div([
+                    html.Span(id='current-time-display', children="00:00",
+                              style={'fontFamily': 'monospace', 'fontSize': '12px', 'color': '#888'})
+                ], className="mb-1"),
+                # Playback controls and slider
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            dbc.Button(html.I(className="fas fa-play"), id='play-btn',
+                                       color="link", size="sm", className="me-2 p-1"),
+                            dbc.Button(html.I(className="fas fa-step-backward"), id='prev-frame-btn',
+                                       color="link", size="sm", className="me-1 p-1"),
+                            dbc.Button(html.I(className="fas fa-step-forward"), id='next-frame-btn',
+                                       color="link", size="sm", className="me-2 p-1"),
+                        ], className="d-flex align-items-center")
+                    ], width="auto"),
+                    dbc.Col([
+                        dcc.Slider(
+                            id='frame-slider',
+                            min=0,
+                            max=100,
+                            value=0,
+                            tooltip={"placement": "bottom", "always_visible": False},
+                            updatemode='drag'
+                        )
+                    ])
+                ], className="align-items-center"),
+                # Store for playback state
+                dcc.Interval(id='playback-interval', interval=33, disabled=True),
+                dcc.Store(id='is-playing', data=False)
+            ], className="mt-3", style={'backgroundColor': 'rgba(30, 30, 50, 0.5)', 'padding': '10px', 'borderRadius': '8px'}),
+        ]),
+
+        # Download component
+        dcc.Download(id='download-data')
+    ]),
+
+    # Store for session data
+    dcc.Store(id='session-id'),
+    dcc.Store(id='uploaded-videos', data={'video1': None, 'video2': None}),
+    dcc.Store(id='results-data'),
+    dcc.Store(id='current-page', data='summary'),  # 'summary' or 'visualization'
+
+    # Stores for skeleton viewer (in static layout for clientside callbacks)
+    dcc.Store(id='skeleton-poses-data', data=None),
+    dcc.Store(id='skeleton-frame-idx', data=0),
+
+    # Dummy div for clientside callback outputs
+    html.Div(id='clientside-output-dummy', style={'display': 'none'}),
+
+], fluid=True, style={'backgroundColor': '#1a1a2e', 'minHeight': '100vh', 'padding': '20px'})
+
+
+# Clientside callback for fullscreen video 1
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var video = document.getElementById('preview-player-1');
+            if (video && video.requestFullscreen) {
+                video.requestFullscreen();
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('fullscreen-btn-1', 'n_clicks'),
+    Input('fullscreen-btn-1', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+# Clientside callback for fullscreen video 2
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var video = document.getElementById('preview-player-2');
+            if (video && video.requestFullscreen) {
+                video.requestFullscreen();
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('fullscreen-btn-2', 'n_clicks'),
+    Input('fullscreen-btn-2', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+# Clientside callback for download video 1
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var video = document.getElementById('preview-player-1');
+            if (video && video.src) {
+                var a = document.createElement('a');
+                a.href = video.src;
+                a.download = 'video_primary.mp4';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('download-btn-1', 'n_clicks'),
+    Input('download-btn-1', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+# Clientside callback for download video 2
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var video = document.getElementById('preview-player-2');
+            if (video && video.src) {
+                var a = document.createElement('a');
+                a.href = video.src;
+                a.download = 'video_secondary.mp4';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('download-btn-2', 'n_clicks'),
+    Input('download-btn-2', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+# Clientside callback to show processing indicator immediately when button clicked
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            return [
+                {'display': 'block'},  // Show processing container
+                {'display': 'none'},   // Hide settings
+                true                   // Disable button
+            ];
+        }
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update, window.dash_clientside.no_update];
+    }
+    """,
+    [Output('processing-container', 'style', allow_duplicate=True),
+     Output('settings-section', 'style', allow_duplicate=True),
+     Output('process-btn', 'disabled', allow_duplicate=True)],
+    Input('process-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+
+# Clientside callback to parse poses from hidden div and set global variable
+app.clientside_callback(
+    """
+    function(posesJsonText, frameIdxText) {
+        if (!posesJsonText) return window.dash_clientside.no_update;
+
+        // Parse poses from hidden div content
+        try {
+            window.skeletonPoses = JSON.parse(posesJsonText);
+            window.skeletonFrame = parseInt(frameIdxText) || 0;
+            console.log('Set skeletonPoses:', window.skeletonPoses.length, 'frames, frame:', window.skeletonFrame);
+        } catch(e) {
+            console.error('Error parsing poses:', e);
+            return window.dash_clientside.no_update;
+        }
+
+        // Try to send to iframe immediately
+        var iframe = document.getElementById('threejs-skeleton');
+        if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage({type: 'setPoses', poses: window.skeletonPoses}, '*');
+            iframe.contentWindow.postMessage({type: 'setFrame', frame: window.skeletonFrame}, '*');
+        }
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('clientside-output-dummy', 'children'),
+    [Input('poses-json-holder', 'children'),
+     Input('frame-idx-holder', 'children')],
+    prevent_initial_call=True
+)
+
+
+# Clientside callback to update frame when slider changes
+app.clientside_callback(
+    """
+    function(frameIdx) {
+        window.skeletonFrame = frameIdx;
+        console.log('Slider changed, frame:', frameIdx);
+        var iframe = document.getElementById('threejs-skeleton');
+        if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage({type: 'setFrame', frame: frameIdx}, '*');
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('clientside-output-dummy', 'title'),
+    Input('frame-slider', 'value'),
+    prevent_initial_call=True
+)
+
+
+# Set up iframe message listener when visualization page shows
+app.clientside_callback(
+    """
+    function(vizStyle) {
+        // Set up listener for iframe ready message
+        if (!window.skeletonListenerSet) {
+            window.skeletonListenerSet = true;
+            window.addEventListener('message', function(event) {
+                if (event.data && (event.data.type === 'skeletonReady' || event.data.type === 'requestPoses')) {
+                    console.log('Iframe requested poses, have:', window.skeletonPoses ? window.skeletonPoses.length : 0);
+                    if (window.skeletonPoses) {
+                        var iframe = document.getElementById('threejs-skeleton');
+                        if (iframe && iframe.contentWindow) {
+                            iframe.contentWindow.postMessage({type: 'setPoses', poses: window.skeletonPoses}, '*');
+                            iframe.contentWindow.postMessage({type: 'setFrame', frame: window.skeletonFrame || 0}, '*');
+                        }
+                    }
+                }
+            });
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('visualization-page', 'className'),
+    Input('visualization-page', 'style'),
+    prevent_initial_call=True
+)
+
+
+# Callback to toggle between summary and visualization pages
+@callback(
+    [Output('summary-page', 'style'),
+     Output('visualization-page', 'style'),
+     Output('current-page', 'data')],
+    [Input('visualize-btn', 'n_clicks'),
+     Input('back-to-summary-btn', 'n_clicks')],
+    State('current-page', 'data'),
+    prevent_initial_call=True
+)
+def toggle_page(viz_clicks, back_clicks, current_page):
+    triggered = ctx.triggered_id
+    if triggered == 'visualize-btn':
+        return {'display': 'none'}, {'display': 'block'}, 'visualization'
+    elif triggered == 'back-to-summary-btn':
+        return {'display': 'block'}, {'display': 'none'}, 'summary'
+    return {'display': 'block'}, {'display': 'none'}, 'summary'
+
+
+# Playback controls callbacks
+@callback(
+    [Output('playback-interval', 'disabled'),
+     Output('is-playing', 'data'),
+     Output('play-btn', 'children')],
+    Input('play-btn', 'n_clicks'),
+    State('is-playing', 'data'),
+    prevent_initial_call=True
+)
+def toggle_playback(n_clicks, is_playing):
+    if n_clicks is None:
+        raise PreventUpdate
+    new_state = not is_playing
+    icon = html.I(className="fas fa-pause" if new_state else "fas fa-play")
+    return not new_state, new_state, icon
+
+
+@callback(
+    Output('frame-slider', 'value', allow_duplicate=True),
+    Input('playback-interval', 'n_intervals'),
+    [State('frame-slider', 'value'),
+     State('frame-slider', 'max'),
+     State('is-playing', 'data')],
+    prevent_initial_call=True
+)
+def auto_advance_frame(n_intervals, current_value, max_value, is_playing):
+    if not is_playing or current_value is None:
+        raise PreventUpdate
+    new_value = current_value + 1
+    if new_value > max_value:
+        new_value = 0
+    return new_value
+
+
+@callback(
+    Output('frame-slider', 'value', allow_duplicate=True),
+    [Input('prev-frame-btn', 'n_clicks'),
+     Input('next-frame-btn', 'n_clicks')],
+    [State('frame-slider', 'value'),
+     State('frame-slider', 'max')],
+    prevent_initial_call=True
+)
+def step_frame(prev_clicks, next_clicks, current_value, max_value):
+    triggered = ctx.triggered_id
+    if triggered == 'prev-frame-btn':
+        return max(0, current_value - 1)
+    elif triggered == 'next-frame-btn':
+        return min(max_value, current_value + 1)
+    raise PreventUpdate
+
+
+@callback(
+    Output('current-time-display', 'children'),
+    Input('frame-slider', 'value'),
+    State('results-data', 'data'),
+    prevent_initial_call=True
+)
+def update_time_display(frame_idx, results_data):
+    if results_data is None:
+        return "00:00"
+    session_id = results_data.get('session_id', '')
+    if session_id not in RESULTS_CACHE:
+        return "00:00"
+    results = RESULTS_CACHE[session_id]
+    fps = results.get('fps', 30)
+    time_sec = frame_idx / fps if fps else 0
+    mins = int(time_sec // 60)
+    secs = int(time_sec % 60)
+    ms = int((time_sec % 1) * 100)
+    return f"{mins:02d}:{secs:02d}.{ms:02d}"
+
+
+@callback(
+    Output('viz-video-player', 'src'),
+    Input('visualization-page', 'style'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def update_viz_video(viz_style, uploaded_videos):
+    if viz_style and viz_style.get('display') == 'none':
+        raise PreventUpdate
+    if not uploaded_videos or not uploaded_videos.get('video1'):
+        return ""
+    video_path = uploaded_videos['video1']
+    try:
+        with open(video_path, 'rb') as f:
+            video_data = base64.b64encode(f.read()).decode('utf-8')
+        return f"data:video/mp4;base64,{video_data}"
+    except Exception:
+        return ""
+
+
+# Callback to populate summary page metrics
+@callback(
+    [Output('session-title', 'children'),
+     Output('capture-time', 'children'),
+     Output('kin-seq-order', 'children'),
+     Output('peak-pelvis-vel', 'children'),
+     Output('peak-trunk-vel', 'children'),
+     Output('peak-arm-vel', 'children'),
+     Output('speed-gain', 'children'),
+     Output('xfactor-peak', 'children'),
+     Output('xfactor-fp', 'children'),
+     Output('xfactor-contact', 'children'),
+     Output('trunk-flexion', 'children'),
+     Output('leak-sway', 'className'),
+     Output('leak-hip-hike', 'className'),
+     Output('leak-drift', 'className'),
+     Output('leak-knee', 'className'),
+     Output('leak-early-ext', 'className'),
+     Output('handedness-display', 'children'),
+     Output('frame-count', 'children'),
+     Output('fps-display', 'children'),
+     Output('camera-count', 'children'),
+     Output('video-player-1', 'src'),
+     Output('video-player-2', 'src')],
+    Input('results-data', 'data'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def update_summary_page(results_data, uploaded_videos):
+    if results_data is None:
+        raise PreventUpdate
+
+    session_id = results_data.get('session_id', '')
+    if session_id not in RESULTS_CACHE:
+        raise PreventUpdate
+
+    results = RESULTS_CACHE[session_id]
+    df = results['timeseries_df']
+    metrics = results.get('metrics')
+    events = results.get('events')
+
+    # Session info
+    session_title = f"Session {session_id[:8]}..."
+    capture_time = f"Captured on {pd.Timestamp.now().strftime('%b %d, %I:%M %p')}"
+
+    # Calculate peak velocities and their timing
+    pelvis_vel = df['pelvis_rotation_velocity'].abs().max() if 'pelvis_rotation_velocity' in df.columns else 0
+    trunk_vel = df['torso_rotation_velocity'].abs().max() if 'torso_rotation_velocity' in df.columns else 0
+    arm_vel = df['right_arm_rotation_velocity'].abs().max() if 'right_arm_rotation_velocity' in df.columns else 0
+
+    # Kinematic sequence order - based on TIMING of peak (who fires first)
+    # Get frame index of peak velocity for each segment
+    pelvis_peak_idx = df['pelvis_rotation_velocity'].abs().idxmax() if 'pelvis_rotation_velocity' in df.columns else 0
+    trunk_peak_idx = df['torso_rotation_velocity'].abs().idxmax() if 'torso_rotation_velocity' in df.columns else 0
+    arm_peak_idx = df['right_arm_rotation_velocity'].abs().idxmax() if 'right_arm_rotation_velocity' in df.columns else 0
+
+    # Sort by timing (earlier peak = fires first)
+    timing = [('Pelvis', pelvis_peak_idx), ('Trunk', trunk_peak_idx), ('Arm', arm_peak_idx)]
+    sorted_timing = sorted(timing, key=lambda x: x[1])
+    kin_order = ' → '.join([t[0] for t in sorted_timing])
+
+    # Speed gain
+    speed_gain = f"{trunk_vel / pelvis_vel:.2f}x" if pelvis_vel > 0 else "N/A"
+
+    # X-Factor values
+    xf_col = 'hip_shoulder_separation' if 'hip_shoulder_separation' in df.columns else 'trunk_twist_clockwise'
+    if xf_col in df.columns:
+        xf_peak = f"{df[xf_col].max():.0f}°"
+        # At foot plant (if we have event)
+        fp_idx = getattr(events, 'foot_plant_idx', len(df)//2) if events else len(df)//2
+        xf_fp = f"{df[xf_col].iloc[min(fp_idx, len(df)-1)]:.0f}°" if fp_idx else "N/A"
+        # At contact
+        contact_idx = getattr(events, 'contact_idx', -1) if events else -1
+        xf_contact = f"{df[xf_col].iloc[contact_idx]:.0f}°" if contact_idx > 0 else "N/A"
+    else:
+        xf_peak = xf_fp = xf_contact = "N/A"
+
+    # Trunk flexion
+    trunk_flex = f"{df['trunk_global_flexion'].iloc[-1]:.0f}°" if 'trunk_global_flexion' in df.columns else "N/A"
+
+    # Energy leak indicators (className based - good or bad)
+    leak_good = "leak-dot leak-good"
+    leak_bad = "leak-dot leak-bad"
+
+    # Dynamic energy leak detection based on actual metrics
+    # Sway: excessive lateral pelvis movement during load phase
+    if 'pelvis_obliquity' in df.columns:
+        sway_range = df['pelvis_obliquity'].max() - df['pelvis_obliquity'].min()
+        leak_sway = leak_bad if sway_range > 15 else leak_good
+    else:
+        leak_sway = leak_good
+
+    # Hip Hike: excessive vertical pelvis tilt variation
+    if 'pelvis_tilt' in df.columns:
+        hip_hike_range = df['pelvis_tilt'].max() - df['pelvis_tilt'].min()
+        leak_hip = leak_bad if hip_hike_range > 20 else leak_good
+    else:
+        leak_hip = leak_good
+
+    # Drifting Forward: COM movement towards pitcher during swing
+    if 'trunk_center_of_mass_x' in df.columns:
+        com_drift = df['trunk_center_of_mass_x'].iloc[-1] - df['trunk_center_of_mass_x'].iloc[0]
+        leak_drift = leak_bad if abs(com_drift) > 0.15 else leak_good
+    else:
+        leak_drift = leak_good
+
+    # Knee Dominance: lead knee extending too early
+    if 'left_knee_extension' in df.columns and 'right_knee_extension' in df.columns:
+        # Check for early extension before contact
+        mid_idx = len(df) // 2
+        early_ext = max(df['left_knee_extension'].iloc[:mid_idx].max(),
+                       df['right_knee_extension'].iloc[:mid_idx].max())
+        leak_knee = leak_bad if early_ext > 160 else leak_good
+    else:
+        leak_knee = leak_good
+
+    # Early Extension: spine extending before contact
+    if 'trunk_global_flexion' in df.columns:
+        mid_idx = len(df) // 2
+        early_trunk_ext = df['trunk_global_flexion'].iloc[:mid_idx].min()
+        leak_ext = leak_bad if early_trunk_ext < -10 else leak_good
+    else:
+        leak_ext = leak_good
+
+    # Session details
+    handedness = "Right" if results_data.get('bats', 'R') == 'R' else "Left"
+    frame_count = str(results_data.get('n_frames', len(df)))
+    fps_val = f"{results.get('fps', 30):.0f} fps"
+    camera_count = str(results_data.get('n_cameras', 1))
+
+    # Video sources - read files and create data URLs for browser playback
+    video1_src = ""
+    video2_src = ""
+    if uploaded_videos:
+        if uploaded_videos.get('video1'):
+            try:
+                with open(uploaded_videos['video1'], 'rb') as f:
+                    video_data = base64.b64encode(f.read()).decode('utf-8')
+                    video1_src = f"data:video/mp4;base64,{video_data}"
+            except Exception:
+                video1_src = ""
+        if uploaded_videos.get('video2'):
+            try:
+                with open(uploaded_videos['video2'], 'rb') as f:
+                    video_data = base64.b64encode(f.read()).decode('utf-8')
+                    video2_src = f"data:video/mp4;base64,{video_data}"
+            except Exception:
+                video2_src = ""
+
+    return (
+        session_title, capture_time, kin_order,
+        f"{pelvis_vel:.0f}°/s", f"{trunk_vel:.0f}°/s", f"{arm_vel:.0f}°/s",
+        speed_gain, xf_peak, xf_fp, xf_contact, trunk_flex,
+        leak_sway, leak_hip, leak_drift, leak_knee, leak_ext,
+        handedness, frame_count, fps_val, camera_count,
+        video1_src, video2_src
+    )
+
+
+# Callbacks
+@callback(
+    [Output('upload-status-1', 'children'),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('process-btn', 'disabled', allow_duplicate=True),
+     Output('upload-zone-1', 'style'),
+     Output('video-preview-1', 'style'),
+     Output('preview-player-1', 'src'),
+     Output('settings-section', 'style', allow_duplicate=True)],
+    Input('upload-video-1', 'contents'),
+    State('upload-video-1', 'filename'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def handle_upload_1(contents, filename, uploaded_videos):
+    if contents is None:
+        raise PreventUpdate
+
+    # Save file
+    filepath = save_uploaded_file(contents, filename, 1)
+    uploaded_videos['video1'] = filepath
+
+    # Truncate long filenames
+    display_name = filename if len(filename) <= 25 else filename[:22] + "..."
+    status = html.Div([
+        html.I(className="fas fa-check-circle", style={'color': '#4ade80', 'marginRight': '8px'}),
+        html.Span(display_name, style={'color': '#4ade80', 'fontSize': '0.85rem'})
+    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'})
+
+    # Enable process button if at least one video uploaded
+    btn_disabled = uploaded_videos['video1'] is None
+
+    return (
+        status,
+        uploaded_videos,
+        btn_disabled,
+        {'display': 'none'},  # Hide upload zone
+        {'display': 'block'},  # Show video preview
+        contents,  # Video source (data URL)
+        {'display': 'block'}  # Show settings
+    )
+
+
+@callback(
+    [Output('upload-status-2', 'children'),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('process-btn', 'disabled', allow_duplicate=True),
+     Output('upload-zone-2', 'style'),
+     Output('video-preview-2', 'style'),
+     Output('preview-player-2', 'src'),
+     Output('settings-section', 'style', allow_duplicate=True)],
+    Input('upload-video-2', 'contents'),
+    State('upload-video-2', 'filename'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def handle_upload_2(contents, filename, uploaded_videos):
+    if contents is None:
+        raise PreventUpdate
+
+    filepath = save_uploaded_file(contents, filename, 2)
+    uploaded_videos['video2'] = filepath
+
+    # Truncate long filenames
+    display_name = filename if len(filename) <= 25 else filename[:22] + "..."
+    status = html.Div([
+        html.I(className="fas fa-check-circle", style={'color': '#4ade80', 'marginRight': '8px'}),
+        html.Span(display_name, style={'color': '#4ade80', 'fontSize': '0.85rem'})
+    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'})
+
+    btn_disabled = uploaded_videos['video1'] is None
+
+    return (
+        status,
+        uploaded_videos,
+        btn_disabled,
+        {'display': 'none'},  # Hide upload zone
+        {'display': 'block'},  # Show video preview
+        contents,  # Video source (data URL)
+        {'display': 'block'}  # Show settings
+    )
+
+
+# Callback to remove video 1
+@callback(
+    [Output('upload-zone-1', 'style', allow_duplicate=True),
+     Output('video-preview-1', 'style', allow_duplicate=True),
+     Output('preview-player-1', 'src', allow_duplicate=True),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('upload-status-1', 'children', allow_duplicate=True),
+     Output('process-btn', 'disabled', allow_duplicate=True),
+     Output('settings-section', 'style', allow_duplicate=True)],
+    Input('remove-btn-1', 'n_clicks'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def remove_video_1(n_clicks, uploaded_videos):
+    if n_clicks is None:
+        raise PreventUpdate
+    uploaded_videos['video1'] = None
+    has_any_video = uploaded_videos.get('video2') is not None
+    return (
+        {'display': 'block'},  # Show upload zone
+        {'display': 'none'},  # Hide preview
+        '',  # Clear video src
+        uploaded_videos,
+        '',  # Clear status
+        True,  # Disable process button (need video 1)
+        {'display': 'block'} if has_any_video else {'display': 'none'}
+    )
+
+
+# Callback to remove video 2
+@callback(
+    [Output('upload-zone-2', 'style', allow_duplicate=True),
+     Output('video-preview-2', 'style', allow_duplicate=True),
+     Output('preview-player-2', 'src', allow_duplicate=True),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('upload-status-2', 'children', allow_duplicate=True)],
+    Input('remove-btn-2', 'n_clicks'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def remove_video_2(n_clicks, uploaded_videos):
+    if n_clicks is None:
+        raise PreventUpdate
+    uploaded_videos['video2'] = None
+    return (
+        {'display': 'block'},  # Show upload zone
+        {'display': 'none'},  # Hide preview
+        '',  # Clear video src
+        uploaded_videos,
+        ''  # Clear status
+    )
+
+
+def save_uploaded_file(contents: str, filename: str, camera_num: int) -> str:
+    """Save uploaded file and return path."""
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+
+    filepath = os.path.join(UPLOAD_DIR, f"camera_{camera_num}_{filename}")
+
+    with open(filepath, 'wb') as f:
+        f.write(decoded)
+
+    return filepath
+
+
+@callback(
+    [Output('upload-page', 'style'),
+     Output('results-section', 'style'),
+     Output('results-data', 'data'),
+     Output('processing-status', 'children'),
+     Output('progress-bar', 'style'),
+     Output('frame-slider', 'max'),
+     Output('frame-slider', 'marks'),
+     Output('processing-container', 'style'),
+     Output('settings-section', 'style')],
+    Input('process-btn', 'n_clicks'),
+    State('uploaded-videos', 'data'),
+    State('bats-selector', 'value'),
+    State('camera-angle', 'value'),
+    State('camera-dist-1', 'value'),
+    State('camera-dist-2', 'value'),
+    prevent_initial_call=True,
+    background=False
+)
+def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, cam_dist_2):
+    if n_clicks is None:
+        raise PreventUpdate
+
+    # Collect video paths
+    video_paths = []
+    if uploaded_videos.get('video1'):
+        video_paths.append(uploaded_videos['video1'])
+    if uploaded_videos.get('video2'):
+        video_paths.append(uploaded_videos['video2'])
+
+    if not video_paths:
+        return (
+            {'display': 'block'}, {'display': 'none'}, None, "No videos uploaded",
+            {'display': 'none'}, 100, {}, {'display': 'none'}, {'display': 'block'}
+        )
+
+    try:
+        # Process videos with calibration data
+        pipeline = MultiViewPipeline(bats=bats)
+
+        # Set camera parameters for 2-view setup with calibration
+        if len(video_paths) == 2:
+            camera_distances = [cam_dist_1 or 2.9, cam_dist_2 or 2.3]
+            pipeline.estimate_cameras_from_videos(
+                video_paths,
+                camera_angle=camera_angle,
+                camera_distances=camera_distances
+            )
+            print(f"Using calibrated cameras: distances={camera_distances}m, angle={camera_angle}°")
+
+        results = pipeline.process_videos(video_paths)
+
+        # Save results to files for analysis
+        output_dir = Path('output')
+        output_dir.mkdir(exist_ok=True)
+
+        # Save timeseries data
+        results['timeseries_df'].to_csv(output_dir / 'timeseries.csv', index=False)
+        print(f"\nSaved timeseries to {output_dir / 'timeseries.csv'}")
+
+        # Save 3D poses
+        poses_3d = results.get('poses_3d', [])
+        if poses_3d:
+            poses_array = np.array(poses_3d)
+            np.save(output_dir / 'poses_3d.npy', poses_array)
+
+            # Also save as CSV for easy viewing
+            n_frames, n_joints, n_coords = poses_array.shape
+            pose_rows = []
+            for f in range(n_frames):
+                row = {'frame': f}
+                for j in range(n_joints):
+                    row[f'joint{j}_x'] = poses_array[f, j, 0]
+                    row[f'joint{j}_y'] = poses_array[f, j, 1]
+                    row[f'joint{j}_z'] = poses_array[f, j, 2]
+                pose_rows.append(row)
+            pd.DataFrame(pose_rows).to_csv(output_dir / 'poses_3d.csv', index=False)
+            print(f"Saved 3D poses ({n_frames} frames, {n_joints} joints) to {output_dir / 'poses_3d.csv'}")
+
+        # Store results
+        session_id = str(uuid.uuid4())
+        RESULTS_CACHE[session_id] = results
+
+        # Prepare serializable data for dcc.Store
+        n_frames = len(results['joint_angles'])
+        df = results['timeseries_df']
+
+        results_data = {
+            'session_id': session_id,
+            'n_frames': n_frames,
+            'fps': results['fps'],
+            'n_cameras': results['n_cameras'],
+            'bats': bats
+        }
+
+        # Create slider marks
+        marks = {}
+        if n_frames > 0:
+            for i in [0, n_frames // 4, n_frames // 2, 3 * n_frames // 4, n_frames - 1]:
+                if i < len(df):
+                    marks[i] = f"{df['timestamp'].iloc[i]:.2f}s"
+
+        return (
+            {'display': 'none'},  # Hide upload page
+            {'display': 'block'},  # Show results section
+            results_data,
+            f"Processed {n_frames} frames from {results['n_cameras']} camera(s)",
+            {'display': 'none'},
+            n_frames - 1 if n_frames > 0 else 100,
+            marks,
+            {'display': 'none'},  # Hide processing container
+            {'display': 'none'}  # Hide settings
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return (
+            {'display': 'block'}, {'display': 'none'}, None, f"Error: {str(e)}",
+            {'display': 'none'}, 100, {}, {'display': 'none'}, {'display': 'block'}
+        )
+
+
+@callback(
+    Output('tab-content', 'children'),
+    [Input('analysis-tabs', 'active_tab'),
+     Input('frame-slider', 'value'),
+     Input('visualization-page', 'style')],  # Trigger on page show
+    [State('results-data', 'data'),
+     State('uploaded-videos', 'data')]
+)
+def render_tab_content(active_tab, frame_idx, viz_style, results_data, uploaded_videos):
+    if results_data is None:
+        raise PreventUpdate
+
+    # Don't render if visualization page is hidden
+    if viz_style and viz_style.get('display') == 'none':
+        raise PreventUpdate
+
+    session_id = results_data['session_id']
+    if session_id not in RESULTS_CACHE:
+        raise PreventUpdate
+
+    results = RESULTS_CACHE[session_id]
+    df = results['timeseries_df']
+    events = results.get('events')
+
+    events_dict = {}
+    if events:
+        events_dict = {
+            'First Move': getattr(events, 'first_move', None),
+            'Foot Plant': getattr(events, 'foot_plant', None),
+            'Contact': getattr(events, 'contact', None)
+        }
+
+    # Default to analytics tab if none selected
+    if not active_tab:
+        active_tab = "tab-analytics"
+
+    # All tabs use the same layout: graphs on left, skeleton on right
+    return render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos)
+
+
+def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos=None):
+    """Render any tab with UPLIFT-style layout: graphs left, skeleton center, video top-right."""
+    import json
+
+    df = results['timeseries_df']
+    poses_3d = results.get('poses_3d', [])
+
+    # Prepare poses for Three.js viewer (fix coordinates)
+    fixed_poses = []
+    for pose in poses_3d:
+        if pose is None:
+            fixed_poses.append([[0, 0, 0]] * 17)
+            continue
+        pose = pose.copy()
+        max_reasonable = 5.0
+        for j in range(len(pose)):
+            if np.any(np.abs(pose[j]) > max_reasonable):
+                if j == 9 or j == 10:
+                    if len(pose) > 8 and np.all(np.abs(pose[8]) < max_reasonable):
+                        pose[j] = pose[8] + np.array([0, 0, 0.15])
+                    else:
+                        pose[j] = np.array([0, 0, 1.7])
+                else:
+                    pose[j] = np.array([0, 0, 0])
+        # Fix coordinate system and center
+        fixed = np.zeros_like(pose)
+        fixed[:, 0] = pose[:, 0]
+        fixed[:, 1] = pose[:, 2]
+        fixed[:, 2] = -pose[:, 1]
+        fixed[:, 2] = fixed[:, 2] - fixed[:, 2].min() + 0.02
+        fixed_poses.append(fixed.tolist())
+
+    # Get graphs for the active tab
+    graphs_content = get_tab_graphs(active_tab, df, results, frame_idx, events_dict)
+
+    # Convert poses to JSON for iframe
+    poses_json = json.dumps(fixed_poses)
+
+    # Get video source directly
+    video_src = ""
+    if uploaded_videos and uploaded_videos.get('video1'):
+        try:
+            with open(uploaded_videos['video1'], 'rb') as f:
+                video_data = base64.b64encode(f.read()).decode('utf-8')
+                video_src = f"data:video/mp4;base64,{video_data}"
+        except Exception:
+            pass
+
+    # UPLIFT-style layout with Three.js iframe and video overlay
+    # Note: poses_json is embedded in a hidden div for the clientside callback to find
+    return html.Div([
+        # Hidden div containing poses JSON for clientside callback to parse
+        html.Div(id='poses-json-holder', children=poses_json, style={'display': 'none'}),
+        html.Div(id='frame-idx-holder', children=str(frame_idx), style={'display': 'none'}),
+
+        dbc.Row([
+            # Left side - stacked graphs (narrower)
+            dbc.Col([
+                html.Div(graphs_content, style={'overflowY': 'auto', 'maxHeight': '550px'})
+            ], width=4, style={'paddingRight': '5px'}),
+
+            # Center/Right - Three.js skeleton viewer with video overlay
+            dbc.Col([
+                html.Div([
+                    # Three.js skeleton viewer (full size)
+                    html.Iframe(
+                        id='threejs-skeleton',
+                        src='/assets/skeleton_viewer.html',
+                        style={
+                            'width': '100%',
+                            'height': '550px',
+                            'border': 'none',
+                            'borderRadius': '8px',
+                            'backgroundColor': '#1e1e32'
+                        }
+                    ),
+                    # Video overlay in top-right corner
+                    html.Div([
+                        html.Div("Video Source", style={'color': '#888', 'fontSize': '11px', 'marginBottom': '2px'}),
+                        html.Div("primary camera", style={'color': '#666', 'fontSize': '9px', 'marginBottom': '4px'}),
+                        html.Video(
+                            id='viz-video-player',
+                            src=video_src,
+                            controls=True,
+                            muted=True,
+                            style={
+                                'width': '100%',
+                                'maxHeight': '140px',
+                                'borderRadius': '6px',
+                                'backgroundColor': '#000'
+                            }
+                        )
+                    ], style={
+                        'position': 'absolute',
+                        'top': '10px',
+                        'right': '10px',
+                        'width': '200px',
+                        'padding': '8px',
+                        'backgroundColor': 'rgba(30, 30, 50, 0.85)',
+                        'borderRadius': '8px',
+                        'boxShadow': '0 4px 12px rgba(0,0,0,0.4)'
+                    })
+                ], style={'position': 'relative'})
+            ], width=8)
+        ], style={'marginTop': '10px'})
+    ])
+
+
+def get_tab_graphs(active_tab, df, results, frame_idx, events_dict):
+    """Get the graph content for a specific tab."""
+
+    if active_tab == "tab-analytics":
+        # Kinematic sequence and X-factor
+        kin_fig = create_kinematic_sequence_figure(df, events_dict)
+        xf_fig = create_xfactor_figure(df, events_dict)
+        return html.Div([
+            dcc.Graph(figure=kin_fig, config={'displayModeBar': False}),
+            dcc.Graph(figure=xf_fig, config={'displayModeBar': False})
+        ])
+
+    elif active_tab == "tab-pelvis":
+        return create_stacked_angle_graphs(df, frame_idx,
+            ['pelvis_rotation', 'pelvis_tilt', 'pelvis_obliquity'],
+            ['Pelvis Rotation', 'Pelvis Tilt', 'Pelvis Obliquity'])
+
+    elif active_tab == "tab-torso":
+        return create_stacked_angle_graphs(df, frame_idx,
+            ['torso_rotation', 'torso_flexion', 'hip_shoulder_separation'],
+            ['Torso Rotation', 'Torso Flexion', 'X-Factor (Hip-Shoulder Sep)'])
+
+    elif active_tab == "tab-arms":
+        return create_stacked_angle_graphs(df, frame_idx,
+            ['right_elbow_flexion', 'left_elbow_flexion', 'right_shoulder_abduction', 'left_shoulder_abduction'],
+            ['Right Elbow Flexion', 'Left Elbow Flexion', 'Right Shoulder Abduction', 'Left Shoulder Abduction'])
+
+    elif active_tab == "tab-legs":
+        return create_stacked_angle_graphs(df, frame_idx,
+            ['right_knee_extension', 'left_knee_extension', 'right_ankle_dorsiflexion', 'left_ankle_dorsiflexion'],
+            ['Right Knee Extension', 'Left Knee Extension', 'Right Ankle Dorsiflexion', 'Left Ankle Dorsiflexion'])
+
+    elif active_tab == "tab-advanced":
+        return create_stacked_angle_graphs(df, frame_idx,
+            ['trunk_center_of_mass_x', 'trunk_center_of_mass_y', 'trunk_center_of_mass_z'],
+            ['Trunk COM X', 'Trunk COM Y', 'Trunk COM Z'])
+
+    return html.Div("Select a tab")
+
+
+def create_stacked_angle_graphs(df, frame_idx, columns, titles):
+    """Create stacked individual graphs with time marker, UPLIFT-style."""
+    graphs = []
+    current_time = df['timestamp'].iloc[frame_idx] if frame_idx < len(df) else 0
+
+    for col, title in zip(columns, titles):
+        if col not in df.columns:
+            continue
+
+        fig = go.Figure()
+
+        # Add the angle trace
+        fig.add_trace(go.Scatter(
+            x=df['timestamp'],
+            y=df[col],
+            mode='lines',
+            line=dict(color='#00ff00', width=2),
+            name=title
+        ))
+
+        # Add vertical time marker
+        y_min = df[col].min()
+        y_max = df[col].max()
+        y_range = y_max - y_min if y_max > y_min else 1
+
+        fig.add_shape(
+            type="line",
+            x0=current_time, x1=current_time,
+            y0=y_min - 0.1 * y_range, y1=y_max + 0.1 * y_range,
+            line=dict(color="white", width=1)
+        )
+
+        # Add marker point at current time
+        current_val = df[col].iloc[frame_idx] if frame_idx < len(df) else 0
+        fig.add_trace(go.Scatter(
+            x=[current_time],
+            y=[current_val],
+            mode='markers',
+            marker=dict(color='white', size=8),
+            showlegend=False
+        ))
+
+        fig.update_layout(
+            title=dict(text=f"{title} [degree]", font=dict(size=12, color='white')),
+            template='plotly_dark',
+            paper_bgcolor='#1a1a2e',
+            plot_bgcolor='#1a1a2e',
+            height=150,
+            margin=dict(l=50, r=20, t=30, b=30),
+            showlegend=False,
+            xaxis=dict(showgrid=True, gridcolor='#333', title=''),
+            yaxis=dict(showgrid=True, gridcolor='#333', title='')
+        )
+
+        graphs.append(dcc.Graph(figure=fig, config={'displayModeBar': False}))
+
+    return html.Div(graphs)
+
+
+def render_pelvis_tab(df, events_dict):
+    """Render pelvis analysis."""
+    angles = ['pelvis_tilt', 'pelvis_obliquity', 'pelvis_rotation']
+    available = [a for a in angles if a in df.columns]
+
+    fig = create_joint_angle_figure(df, available, "Pelvis Angles", events_dict)
+
+    # Add velocity plot
+    velo_cols = [f'{a}_velocity' for a in available if f'{a}_velocity' in df.columns]
+    if velo_cols:
+        velo_fig = create_joint_angle_figure(df, velo_cols, "Pelvis Angular Velocities", events_dict)
+        return html.Div([
+            dcc.Graph(figure=fig, config={'displayModeBar': False}),
+            dcc.Graph(figure=velo_fig, config={'displayModeBar': False})
+        ])
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+def render_torso_tab(df, events_dict):
+    """Render torso analysis."""
+    angles = ['torso_flexion', 'torso_lateral_tilt', 'torso_rotation', 'hip_shoulder_separation']
+    available = [a for a in angles if a in df.columns]
+
+    fig = create_joint_angle_figure(df, available, "Torso Angles", events_dict)
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+def render_arms_tab(df, events_dict):
+    """Render arms analysis."""
+    fig = make_subplots(rows=2, cols=2, subplot_titles=(
+        'Elbow Flexion', 'Shoulder Abduction',
+        'Shoulder Rotation', 'Elbow Velocity'
+    ))
+
+    # Elbow flexion
+    for col in ['left_elbow_flexion', 'right_elbow_flexion']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=1)
+
+    # Shoulder abduction
+    for col in ['left_shoulder_abduction', 'right_shoulder_abduction']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=2)
+
+    # Shoulder rotation
+    for col in ['left_shoulder_rotation', 'right_shoulder_rotation']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=1)
+
+    # Elbow velocity
+    for col in ['left_elbow_flexion_velocity', 'right_elbow_flexion_velocity']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=2)
+
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='#1a1a2e',
+        plot_bgcolor='#1a1a2e',
+        height=600,
+        showlegend=True
+    )
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+def render_legs_tab(df, events_dict):
+    """Render legs analysis."""
+    fig = make_subplots(rows=2, cols=2, subplot_titles=(
+        'Knee Extension', 'Hip Flexion',
+        'Ankle Dorsiflexion', 'Knee Varus'
+    ))
+
+    # Knee extension
+    for col in ['left_knee_extension', 'right_knee_extension']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=1)
+
+    # Hip flexion
+    for col in ['left_hip_flexion_with_respect_to_trunk', 'right_hip_flexion_with_respect_to_trunk',
+                'left_hip_flexion', 'right_hip_flexion']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=2)
+            break  # Only add one set
+
+    # Ankle dorsiflexion
+    for col in ['left_ankle_dorsiflexion', 'right_ankle_dorsiflexion']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=1)
+
+    # Knee varus
+    for col in ['left_knee_varus', 'right_knee_varus']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=2)
+
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='#1a1a2e',
+        plot_bgcolor='#1a1a2e',
+        height=600,
+        showlegend=True
+    )
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+def render_advanced_tab(df, events_dict):
+    """Render advanced metrics (center of mass, etc.)."""
+    fig = make_subplots(rows=2, cols=2, subplot_titles=(
+        'Center of Mass X', 'Center of Mass Y',
+        'Center of Mass Z', 'Arm Rotation (Kinematic Seq)'
+    ))
+
+    # COM X
+    for col in ['trunk_center_of_mass_x', 'whole_body_center_of_mass_x']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=1)
+
+    # COM Y
+    for col in ['trunk_center_of_mass_y', 'whole_body_center_of_mass_y']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=1, col=2)
+
+    # COM Z
+    for col in ['trunk_center_of_mass_z', 'whole_body_center_of_mass_z']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=1)
+
+    # Arm rotation
+    for col in ['left_arm_rotation', 'right_arm_rotation']:
+        if col in df.columns:
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df[col], name=col.replace('_', ' ')),
+                         row=2, col=2)
+
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor='#1a1a2e',
+        plot_bgcolor='#1a1a2e',
+        height=600,
+        showlegend=True
+    )
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+@callback(
+    Output('download-data', 'data'),
+    [Input('export-csv-btn', 'n_clicks'),
+     Input('export-report-btn', 'n_clicks')],
+    State('results-data', 'data'),
+    prevent_initial_call=True
+)
+def export_data(csv_clicks, report_clicks, results_data):
+    if results_data is None:
+        raise PreventUpdate
+
+    session_id = results_data['session_id']
+    if session_id not in RESULTS_CACHE:
+        raise PreventUpdate
+
+    results = RESULTS_CACHE[session_id]
+    triggered = ctx.triggered_id
+
+    if triggered == 'export-csv-btn':
+        df = results['timeseries_df']
+        return dcc.send_data_frame(df.to_csv, "biomechanics_data.csv", index=False)
+
+    elif triggered == 'export-report-btn':
+        # Export metrics
+        metrics = results['metrics']
+        metrics_dict = {k: v for k, v in metrics.__dict__.items() if v is not None}
+        metrics_df = pd.DataFrame([metrics_dict])
+        return dcc.send_data_frame(metrics_df.to_csv, "poi_metrics.csv", index=False)
+
+    raise PreventUpdate
+
+
+def run_app(debug: bool = False, port: int = 8050):
+    """Run the web application."""
+    print("\n" + "=" * 60)
+    print("VIDEO BIOMECHANICS ANALYZER")
+    print("=" * 60)
+    print(f"\nOpen your browser to: http://localhost:{port}")
+    print("\nUpload 1-2 videos to analyze swing biomechanics")
+    print("Press Ctrl+C to stop\n")
+
+    app.run(debug=debug, port=port)
+
+
+if __name__ == "__main__":
+    run_app(debug=False)
