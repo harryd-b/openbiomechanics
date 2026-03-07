@@ -280,6 +280,36 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 }
 .nav-tabs .nav-link:hover { color: #aaa; }
 
+/* Accordion styling (UPLIFT-style) */
+.accordion { background: transparent !important; }
+.accordion-item {
+    background: #1e1e32 !important;
+    border: none !important;
+    border-bottom: 1px solid rgba(255,255,255,0.05) !important;
+}
+.accordion-button {
+    background: #1e1e32 !important;
+    color: #ccc !important;
+    font-size: 0.9rem !important;
+    padding: 12px 16px !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.accordion-button:not(.collapsed) {
+    background: #252540 !important;
+    color: #fff !important;
+}
+.accordion-button::after {
+    filter: invert(1) brightness(0.7);
+}
+.accordion-button:focus {
+    box-shadow: none !important;
+}
+.accordion-body {
+    background: #1a1a2e !important;
+    padding: 0 !important;
+}
+
 /* Timeline slider */
 .rc-slider-track { background: #00d4aa; }
 .rc-slider-handle { border-color: #00d4aa; }
@@ -738,14 +768,13 @@ app.layout = dbc.Container([
                 ], width=6)
             ], className="mb-3"),
 
-            # Tabs for different views
+            # Tabs for different views (UPLIFT-style)
             dbc.Tabs([
                 dbc.Tab(label="Analytics", tab_id="tab-analytics"),
+                dbc.Tab(label="Shoulders", tab_id="tab-shoulders"),
                 dbc.Tab(label="Pelvis", tab_id="tab-pelvis"),
-                dbc.Tab(label="Torso", tab_id="tab-torso"),
                 dbc.Tab(label="Arms", tab_id="tab-arms"),
                 dbc.Tab(label="Legs", tab_id="tab-legs"),
-                dbc.Tab(label="Advanced", tab_id="tab-advanced"),
             ], id="analysis-tabs", active_tab="tab-analytics", className="mb-4"),
 
             # Tab content
@@ -1708,7 +1737,7 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
 
 
 def get_tab_graphs(active_tab, df, results, frame_idx, events_dict):
-    """Get the graph content for a specific tab."""
+    """Get the graph content for a specific tab with UPLIFT-style accordions."""
 
     if active_tab == "tab-analytics":
         # Kinematic sequence and X-factor
@@ -1719,32 +1748,220 @@ def get_tab_graphs(active_tab, df, results, frame_idx, events_dict):
             dcc.Graph(figure=xf_fig, config={'displayModeBar': False})
         ])
 
-    elif active_tab == "tab-pelvis":
-        return create_stacked_angle_graphs(df, frame_idx,
-            ['pelvis_rotation', 'pelvis_tilt', 'pelvis_obliquity'],
-            ['Pelvis Rotation', 'Pelvis Tilt', 'Pelvis Obliquity'])
+    elif active_tab == "tab-shoulders":
+        return create_uplift_accordion_tab(df, frame_idx, [
+            {
+                'title': 'Shoulder Movement',
+                'metrics': [
+                    ('shoulder_displacement_x', 'shoulder displacement (side-to-side) [m]'),
+                    ('shoulder_displacement_y', 'shoulder displacement (front-to-back) [m]'),
+                    ('shoulder_displacement_z', 'shoulder displacement (elevation) [m]'),
+                ]
+            },
+            {
+                'title': 'Shoulder Rotations',
+                'metrics': [
+                    ('torso_lateral_tilt', 'shoulder tilt (side-to-side) [degree]'),
+                    ('torso_rotation', 'shoulder rotation (internal) [degree]'),
+                    ('torso_rotation_velocity', 'shoulder rotational velocity [degree/s]'),
+                ]
+            }
+        ])
 
-    elif active_tab == "tab-torso":
-        return create_stacked_angle_graphs(df, frame_idx,
-            ['torso_rotation', 'torso_flexion', 'hip_shoulder_separation'],
-            ['Torso Rotation', 'Torso Flexion', 'X-Factor (Hip-Shoulder Sep)'])
+    elif active_tab == "tab-pelvis":
+        return create_uplift_accordion_tab(df, frame_idx, [
+            {
+                'title': 'Pelvis Movement',
+                'metrics': [
+                    ('pelvis_displacement_x', 'pelvis displacement (side-to-side) [m]'),
+                    ('pelvis_displacement_y', 'pelvis displacement (front-to-back) [m]'),
+                    ('pelvis_displacement_z', 'pelvis displacement (elevation) [m]'),
+                ]
+            },
+            {
+                'title': 'Pelvis Rotations',
+                'metrics': [
+                    ('pelvis_tilt', 'pelvis tilt (side-to-side) [degree]'),
+                    ('pelvis_rotation', 'pelvis rotation (internal) [degree]'),
+                    ('pelvis_rotation_velocity', 'pelvis rotational velocity [degree/s]'),
+                ]
+            }
+        ])
 
     elif active_tab == "tab-arms":
-        return create_stacked_angle_graphs(df, frame_idx,
-            ['right_elbow_flexion', 'left_elbow_flexion', 'right_shoulder_abduction', 'left_shoulder_abduction'],
-            ['Right Elbow Flexion', 'Left Elbow Flexion', 'Right Shoulder Abduction', 'Left Shoulder Abduction'])
+        return create_uplift_accordion_tab(df, frame_idx, [
+            {
+                'title': 'Elbows',
+                'metrics': [
+                    ('right_elbow_flexion', 'right elbow extension [degree]'),
+                    ('left_elbow_flexion', 'left elbow extension [degree]'),
+                ]
+            },
+            {
+                'title': 'Elbow Velocities',
+                'metrics': [
+                    ('left_elbow_flexion_velocity', 'left elbow angular velocity [degree/s]'),
+                    ('right_elbow_flexion_velocity', 'right elbow angular velocity [degree/s]'),
+                ]
+            },
+            {
+                'title': 'Arm Rotations',
+                'metrics': [
+                    ('left_shoulder_rotation', 'left arm rotation (external) [degree]'),
+                    ('right_shoulder_rotation', 'right arm rotation (external) [degree]'),
+                ]
+            }
+        ])
 
     elif active_tab == "tab-legs":
-        return create_stacked_angle_graphs(df, frame_idx,
-            ['right_knee_extension', 'left_knee_extension', 'right_ankle_dorsiflexion', 'left_ankle_dorsiflexion'],
-            ['Right Knee Extension', 'Left Knee Extension', 'Right Ankle Dorsiflexion', 'Left Ankle Dorsiflexion'])
-
-    elif active_tab == "tab-advanced":
-        return create_stacked_angle_graphs(df, frame_idx,
-            ['trunk_center_of_mass_x', 'trunk_center_of_mass_y', 'trunk_center_of_mass_z'],
-            ['Trunk COM X', 'Trunk COM Y', 'Trunk COM Z'])
+        return create_uplift_accordion_tab(df, frame_idx, [
+            {
+                'title': 'Legs',
+                'metrics': [
+                    ('right_knee_extension', 'right knee extension [degree]'),
+                    ('left_knee_extension', 'left knee extension [degree]'),
+                ]
+            }
+        ])
 
     return html.Div("Select a tab")
+
+
+def create_uplift_accordion_tab(df, frame_idx, sections):
+    """Create UPLIFT-style accordion sections with graphs."""
+    current_time = df['timestamp'].iloc[frame_idx] if frame_idx < len(df) else 0
+
+    accordion_items = []
+    for section in sections:
+        graphs = []
+        for col, label in section['metrics']:
+            # Try to find the column or a similar one
+            actual_col = find_column(df, col)
+            if actual_col is None:
+                continue
+
+            fig = create_uplift_graph(df, actual_col, label, current_time, frame_idx)
+            graphs.append(dcc.Graph(figure=fig, config={'displayModeBar': False},
+                                   style={'marginBottom': '0px'}))
+
+        if graphs:
+            accordion_items.append(
+                dbc.AccordionItem(
+                    html.Div(graphs),
+                    title=section['title'],
+                    style={'backgroundColor': '#1a1a2e', 'border': 'none'}
+                )
+            )
+
+    if not accordion_items:
+        return html.Div("No data available for this tab", style={'color': '#666', 'padding': '20px'})
+
+    return dbc.Accordion(
+        accordion_items,
+        start_collapsed=False,
+        always_open=True,
+        style={'backgroundColor': '#1a1a2e'}
+    )
+
+
+def find_column(df, col_name):
+    """Find a column by name or partial match."""
+    if col_name in df.columns:
+        return col_name
+
+    # Try common variations
+    variations = [
+        col_name,
+        col_name.replace('_', ''),
+        col_name.replace('displacement', 'position'),
+        col_name.replace('shoulder_displacement', 'trunk_center_of_mass'),
+        col_name.replace('pelvis_displacement', 'pelvis_center_of_mass'),
+    ]
+
+    for var in variations:
+        if var in df.columns:
+            return var
+
+    # Try partial match
+    for c in df.columns:
+        if col_name.replace('_', '') in c.replace('_', ''):
+            return c
+
+    return None
+
+
+def create_uplift_graph(df, col, label, current_time, frame_idx, color='#00ff00'):
+    """Create a single UPLIFT-style graph with time marker."""
+    fig = go.Figure()
+
+    # Main trace
+    fig.add_trace(go.Scatter(
+        x=df['timestamp'],
+        y=df[col],
+        mode='lines',
+        line=dict(color=color, width=2),
+        name=label,
+        hovertemplate='%{y:.2f}<extra></extra>'
+    ))
+
+    # Calculate Y range
+    y_min = df[col].min()
+    y_max = df[col].max()
+    y_range = y_max - y_min if y_max > y_min else 1
+    y_padding = y_range * 0.1
+
+    # Vertical time marker line
+    fig.add_shape(
+        type="line",
+        x0=current_time, x1=current_time,
+        y0=y_min - y_padding, y1=y_max + y_padding,
+        line=dict(color="rgba(255,255,255,0.7)", width=1)
+    )
+
+    # Current position marker (circle on the line)
+    current_val = df[col].iloc[frame_idx] if frame_idx < len(df) else 0
+    fig.add_trace(go.Scatter(
+        x=[current_time],
+        y=[current_val],
+        mode='markers',
+        marker=dict(
+            color='white',
+            size=10,
+            line=dict(color='#00ff00', width=2)
+        ),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=label,
+            font=dict(size=11, color='#ccc'),
+            x=0.01,
+            xanchor='left'
+        ),
+        template='plotly_dark',
+        paper_bgcolor='rgba(26,26,46,0)',
+        plot_bgcolor='rgba(26,26,46,0.5)',
+        height=120,
+        margin=dict(l=45, r=10, t=25, b=20),
+        showlegend=False,
+        xaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(80,80,80,0.3)',
+            showticklabels=False,
+            zeroline=False
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(80,80,80,0.3)',
+            tickfont=dict(size=9, color='#888'),
+            zeroline=True,
+            zerolinecolor='rgba(100,100,100,0.5)'
+        )
+    )
+
+    return fig
 
 
 def create_stacked_angle_graphs(df, frame_idx, columns, titles):

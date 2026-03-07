@@ -35,7 +35,7 @@
 </head>
 <body>
     <div id="skeleton-container"></div>
-    <div id="mode-indicator">Mode: Polygon</div>
+    <div id="mode-indicator">Mode: Anatomical</div>
 
     <!-- Three.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -43,30 +43,30 @@
 
     <script>
         // Render modes
-        const RENDER_MODES = ['polygon', 'cylinder'];
-        let currentMode = 'polygon';
+        const RENDER_MODES = ['anatomical', 'polygon', 'cylinder'];
+        let currentMode = 'anatomical';
 
-        // H36M skeleton connections with thickness multipliers
+        // H36M skeleton connections
         const SKELETON_CONNECTIONS = [
-            { joints: [0, 7], thick: 2.0, type: 'core' },    // Hip to spine
-            { joints: [7, 8], thick: 1.8, type: 'core' },    // Spine
-            { joints: [8, 9], thick: 1.4, type: 'core' },    // Neck
-            { joints: [9, 10], thick: 1.0, type: 'head' },   // Head
-            { joints: [8, 11], thick: 1.5, type: 'arm' },    // Left shoulder
-            { joints: [11, 12], thick: 1.2, type: 'arm' },   // Left upper arm
-            { joints: [12, 13], thick: 0.9, type: 'arm' },   // Left forearm
-            { joints: [8, 14], thick: 1.5, type: 'arm' },    // Right shoulder
-            { joints: [14, 15], thick: 1.2, type: 'arm' },   // Right upper arm
-            { joints: [15, 16], thick: 0.9, type: 'arm' },   // Right forearm
-            { joints: [0, 4], thick: 1.7, type: 'leg' },     // Left hip
-            { joints: [4, 5], thick: 1.5, type: 'leg' },     // Left thigh
-            { joints: [5, 6], thick: 1.1, type: 'leg' },     // Left shin
-            { joints: [0, 1], thick: 1.7, type: 'leg' },     // Right hip
-            { joints: [1, 2], thick: 1.5, type: 'leg' },     // Right thigh
-            { joints: [2, 3], thick: 1.1, type: 'leg' },     // Right shin
+            { joints: [0, 7], thick: 2.0, type: 'core', bone: 'spine' },
+            { joints: [7, 8], thick: 1.8, type: 'core', bone: 'spine' },
+            { joints: [8, 9], thick: 1.4, type: 'core', bone: 'neck' },
+            { joints: [9, 10], thick: 1.0, type: 'head', bone: 'skull' },
+            { joints: [8, 11], thick: 1.5, type: 'arm', bone: 'clavicle' },
+            { joints: [11, 12], thick: 1.2, type: 'arm', bone: 'humerus' },
+            { joints: [12, 13], thick: 0.9, type: 'arm', bone: 'radius' },
+            { joints: [8, 14], thick: 1.5, type: 'arm', bone: 'clavicle' },
+            { joints: [14, 15], thick: 1.2, type: 'arm', bone: 'humerus' },
+            { joints: [15, 16], thick: 0.9, type: 'arm', bone: 'radius' },
+            { joints: [0, 4], thick: 1.7, type: 'leg', bone: 'pelvis' },
+            { joints: [4, 5], thick: 1.5, type: 'leg', bone: 'femur' },
+            { joints: [5, 6], thick: 1.1, type: 'leg', bone: 'tibia' },
+            { joints: [0, 1], thick: 1.7, type: 'leg', bone: 'pelvis' },
+            { joints: [1, 2], thick: 1.5, type: 'leg', bone: 'femur' },
+            { joints: [2, 3], thick: 1.1, type: 'leg', bone: 'tibia' },
         ];
 
-        // Joint sizes for cylinder mode
+        // Joint sizes
         const JOINT_SIZES = {
             0: 0.07, 1: 0.05, 2: 0.05, 3: 0.04,
             4: 0.05, 5: 0.05, 6: 0.04,
@@ -75,17 +75,13 @@
             14: 0.055, 15: 0.05, 16: 0.04,
         };
 
-        // Polygon mode joint sizes (octahedrons)
-        const POLY_JOINT_SIZES = {
-            0: 0.09, 1: 0.06, 2: 0.06, 3: 0.05,
-            4: 0.06, 5: 0.06, 6: 0.05,
-            7: 0.07, 8: 0.07, 9: 0.06, 10: 0.12,
-            11: 0.06, 12: 0.055, 13: 0.045,
-            14: 0.06, 15: 0.055, 16: 0.045,
-        };
-
-        // Color palette - red/orange for polygon mode (like UPLIFT), cyan for cylinder
-        const COLORS = {
+        // Anatomical bone colors (realistic ivory/cream)
+        const BONE_COLORS = {
+            anatomical: {
+                bone: { main: 0xf5f0e1, emissive: 0x2a2520 },
+                joint: { main: 0xe8dcc8, emissive: 0x252015 },
+                skull: { main: 0xf8f4e8, emissive: 0x2f2a20 },
+            },
             polygon: {
                 core: { main: 0xcc3333, emissive: 0x441111 },
                 arm: { main: 0xdd4444, emissive: 0x331111 },
@@ -103,11 +99,11 @@
         };
 
         let scene, camera, renderer, controls;
-        let skeletonGroup = null;  // Container for all skeleton meshes
+        let skeletonGroup = null;
         let poses = [];
         let currentFrame = 0;
         let poseHistory = [];
-        let jointPositions = [];  // Store computed joint positions
+        let jointPositions = [];
 
         function init() {
             const container = document.getElementById('skeleton-container');
@@ -127,7 +123,7 @@
             container.appendChild(renderer.domElement);
 
             // Lighting
-            const ambient = new THREE.AmbientLight(0x404060, 0.6);
+            const ambient = new THREE.AmbientLight(0x606080, 0.7);
             scene.add(ambient);
 
             const directional = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -137,11 +133,11 @@
             directional.shadow.mapSize.height = 2048;
             scene.add(directional);
 
-            const rimLight = new THREE.DirectionalLight(0xff6666, 0.3);
+            const rimLight = new THREE.DirectionalLight(0xffeedd, 0.4);
             rimLight.position.set(-3, 5, -5);
             scene.add(rimLight);
 
-            const fillLight = new THREE.PointLight(0x6666aa, 0.4);
+            const fillLight = new THREE.PointLight(0x8888aa, 0.3);
             fillLight.position.set(0, 0.5, 2);
             scene.add(fillLight);
 
@@ -156,12 +152,10 @@
             shadowPlane.receiveShadow = true;
             scene.add(shadowPlane);
 
-            // Initialize joint positions array
             for (let i = 0; i < 17; i++) {
                 jointPositions.push(new THREE.Vector3());
             }
 
-            // Create skeleton group
             skeletonGroup = new THREE.Group();
             scene.add(skeletonGroup);
 
@@ -173,7 +167,6 @@
             controls.maxDistance = 10;
             controls.update();
 
-            // Mode toggle
             document.getElementById('mode-indicator').addEventListener('click', toggleMode);
 
             window.addEventListener('resize', onResize);
@@ -187,8 +180,11 @@
             currentMode = RENDER_MODES[(idx + 1) % RENDER_MODES.length];
             document.getElementById('mode-indicator').textContent = 'Mode: ' + currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
 
-            // Update colors based on mode
-            if (currentMode === 'polygon') {
+            // Update background based on mode
+            if (currentMode === 'anatomical') {
+                scene.background = new THREE.Color(0x1a1a2e);
+                scene.fog = new THREE.Fog(0x1a1a2e, 5, 15);
+            } else if (currentMode === 'polygon') {
                 scene.background = new THREE.Color(0x1a1a2e);
                 scene.fog = new THREE.Fog(0x1a1a2e, 5, 15);
             } else {
@@ -196,7 +192,6 @@
                 scene.fog = new THREE.Fog(0x0a0a18, 4, 12);
             }
 
-            // Re-render current frame
             if (poses.length > 0 && currentFrame < poses.length) {
                 updateSkeleton(poses[currentFrame]);
             }
@@ -244,11 +239,278 @@
             }
         }
 
+        // ===== ANATOMICAL SKELETON RENDERING =====
+
+        function createAnatomicalBone(startPos, endPos, thickness, boneType) {
+            const colors = BONE_COLORS.anatomical;
+            const direction = new THREE.Vector3().subVectors(endPos, startPos);
+            const length = direction.length();
+            if (length < 0.001) return null;
+
+            const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+            const group = new THREE.Group();
+
+            // Create bone-shaped geometry (tapered cylinder with knobby ends)
+            const boneWidth = 0.018 * thickness;
+
+            // Main bone shaft - slightly curved profile
+            const shaftGeo = new THREE.CylinderGeometry(
+                boneWidth * 0.7,  // top (narrower)
+                boneWidth * 0.8,  // bottom
+                0.7,              // height (will be scaled)
+                8                 // segments
+            );
+            const boneMat = new THREE.MeshStandardMaterial({
+                color: colors.bone.main,
+                emissive: colors.bone.emissive,
+                roughness: 0.6,
+                metalness: 0.1
+            });
+            const shaft = new THREE.Mesh(shaftGeo, boneMat);
+            shaft.castShadow = true;
+            group.add(shaft);
+
+            // Epiphysis (bone ends) - larger rounded ends
+            const endRadius = boneWidth * 1.1;
+            const topEndGeo = new THREE.SphereGeometry(endRadius, 8, 6);
+            const topEnd = new THREE.Mesh(topEndGeo, boneMat.clone());
+            topEnd.position.y = 0.35;
+            topEnd.scale.set(1, 0.7, 1);
+            topEnd.castShadow = true;
+            group.add(topEnd);
+
+            const bottomEndGeo = new THREE.SphereGeometry(endRadius * 1.1, 8, 6);
+            const bottomEnd = new THREE.Mesh(bottomEndGeo, boneMat.clone());
+            bottomEnd.position.y = -0.35;
+            bottomEnd.scale.set(1.1, 0.8, 1.1);
+            bottomEnd.castShadow = true;
+            group.add(bottomEnd);
+
+            // Position and orient the bone group
+            group.position.copy(midPoint);
+            group.scale.y = length;
+
+            const axis = new THREE.Vector3(0, 1, 0);
+            const quaternion = new THREE.Quaternion();
+            quaternion.setFromUnitVectors(axis, direction.normalize());
+            group.quaternion.copy(quaternion);
+
+            return group;
+        }
+
+        function createAnatomicalJoint(position, size, jointType) {
+            const colors = BONE_COLORS.anatomical;
+
+            // Create articulating joint surface
+            const geo = new THREE.SphereGeometry(size * 0.9, 12, 8);
+            const mat = new THREE.MeshStandardMaterial({
+                color: colors.joint.main,
+                emissive: colors.joint.emissive,
+                roughness: 0.5,
+                metalness: 0.05
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(position);
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function createAnatomicalSkull(position, size) {
+            const colors = BONE_COLORS.anatomical;
+            const group = new THREE.Group();
+
+            // Cranium (main skull)
+            const craniumGeo = new THREE.SphereGeometry(size, 16, 12);
+            craniumGeo.scale(1, 1.1, 1.15); // Elongate slightly
+            const skullMat = new THREE.MeshStandardMaterial({
+                color: colors.skull.main,
+                emissive: colors.skull.emissive,
+                roughness: 0.5,
+                metalness: 0.05
+            });
+            const cranium = new THREE.Mesh(craniumGeo, skullMat);
+            cranium.castShadow = true;
+            group.add(cranium);
+
+            // Jaw/mandible
+            const jawGeo = new THREE.SphereGeometry(size * 0.5, 8, 6);
+            jawGeo.scale(0.8, 0.5, 0.9);
+            const jaw = new THREE.Mesh(jawGeo, skullMat.clone());
+            jaw.position.set(0, -size * 0.5, size * 0.3);
+            jaw.castShadow = true;
+            group.add(jaw);
+
+            // Eye sockets (dark indentations)
+            const eyeGeo = new THREE.SphereGeometry(size * 0.18, 8, 6);
+            const eyeMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1a2e,
+                roughness: 0.9,
+                metalness: 0
+            });
+
+            const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+            leftEye.position.set(-size * 0.35, -size * 0.1, size * 0.75);
+            group.add(leftEye);
+
+            const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+            rightEye.position.set(size * 0.35, -size * 0.1, size * 0.75);
+            group.add(rightEye);
+
+            // Nasal cavity
+            const noseGeo = new THREE.ConeGeometry(size * 0.12, size * 0.2, 3);
+            const noseMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1a2e,
+                roughness: 0.9,
+                metalness: 0
+            });
+            const nose = new THREE.Mesh(noseGeo, noseMat);
+            nose.position.set(0, -size * 0.3, size * 0.8);
+            nose.rotation.x = Math.PI;
+            group.add(nose);
+
+            group.position.copy(position);
+            return group;
+        }
+
+        function createAnatomicalRibcage() {
+            // Create ribcage between spine and shoulders
+            const spine = jointPositions[8];
+            const leftShoulder = jointPositions[11];
+            const rightShoulder = jointPositions[14];
+            const pelvis = jointPositions[0];
+
+            const colors = BONE_COLORS.anatomical;
+            const group = new THREE.Group();
+
+            // Sternum
+            const sternumStart = new THREE.Vector3(
+                (leftShoulder.x + rightShoulder.x) / 2,
+                spine.y - 0.05,
+                (leftShoulder.z + rightShoulder.z) / 2 + 0.08
+            );
+            const sternumEnd = new THREE.Vector3(
+                sternumStart.x,
+                (spine.y + pelvis.y) / 2 + 0.1,
+                sternumStart.z
+            );
+
+            const sternumDir = new THREE.Vector3().subVectors(sternumEnd, sternumStart);
+            const sternumLen = sternumDir.length();
+            const sternumMid = new THREE.Vector3().addVectors(sternumStart, sternumEnd).multiplyScalar(0.5);
+
+            const sternumGeo = new THREE.BoxGeometry(0.04, sternumLen, 0.015);
+            const boneMat = new THREE.MeshStandardMaterial({
+                color: colors.bone.main,
+                emissive: colors.bone.emissive,
+                roughness: 0.6,
+                metalness: 0.1
+            });
+            const sternum = new THREE.Mesh(sternumGeo, boneMat);
+            sternum.position.copy(sternumMid);
+            sternum.castShadow = true;
+            group.add(sternum);
+
+            // Ribs (simplified - curved tubes from spine to sternum)
+            const numRibs = 5;
+            for (let i = 0; i < numRibs; i++) {
+                const t = (i + 0.5) / numRibs;
+                const ribY = spine.y - t * 0.25;
+
+                // Left rib
+                const leftRibStart = new THREE.Vector3(spine.x - 0.02, ribY, spine.z);
+                const leftRibEnd = new THREE.Vector3(sternumStart.x - 0.02, ribY + 0.02, sternumStart.z);
+                createRib(leftRibStart, leftRibEnd, group, boneMat);
+
+                // Right rib
+                const rightRibStart = new THREE.Vector3(spine.x + 0.02, ribY, spine.z);
+                const rightRibEnd = new THREE.Vector3(sternumStart.x + 0.02, ribY + 0.02, sternumStart.z);
+                createRib(rightRibStart, rightRibEnd, group, boneMat);
+            }
+
+            return group;
+        }
+
+        function createRib(start, end, group, material) {
+            // Create curved rib using tube geometry
+            const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+            mid.z += 0.06; // Curve outward
+            mid.x *= 1.3;  // Widen at middle
+
+            const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+            const tubeGeo = new THREE.TubeGeometry(curve, 8, 0.008, 4, false);
+            const rib = new THREE.Mesh(tubeGeo, material.clone());
+            rib.castShadow = true;
+            group.add(rib);
+        }
+
+        function createAnatomicalPelvis() {
+            const colors = BONE_COLORS.anatomical;
+            const hip = jointPositions[0];
+            const leftHip = jointPositions[4];
+            const rightHip = jointPositions[1];
+
+            const group = new THREE.Group();
+
+            // Sacrum (central triangular bone)
+            const sacrumGeo = new THREE.ConeGeometry(0.06, 0.1, 4);
+            const boneMat = new THREE.MeshStandardMaterial({
+                color: colors.bone.main,
+                emissive: colors.bone.emissive,
+                roughness: 0.6,
+                metalness: 0.1
+            });
+            const sacrum = new THREE.Mesh(sacrumGeo, boneMat);
+            sacrum.position.copy(hip);
+            sacrum.position.z -= 0.03;
+            sacrum.rotation.x = Math.PI * 0.1;
+            sacrum.castShadow = true;
+            group.add(sacrum);
+
+            // Ilium (hip bones) - wing-like structures
+            const createIlium = (side) => {
+                const hipJoint = side === 'left' ? leftHip : rightHip;
+                const xSign = side === 'left' ? -1 : 1;
+
+                // Main ilium body
+                const iliumGeo = new THREE.SphereGeometry(0.07, 8, 6);
+                iliumGeo.scale(1.5, 0.6, 0.8);
+                const ilium = new THREE.Mesh(iliumGeo, boneMat.clone());
+                ilium.position.set(
+                    hip.x + xSign * 0.05,
+                    hip.y + 0.02,
+                    hip.z
+                );
+                ilium.rotation.z = xSign * 0.3;
+                ilium.castShadow = true;
+                group.add(ilium);
+
+                // Acetabulum (hip socket)
+                const socketGeo = new THREE.TorusGeometry(0.025, 0.008, 6, 12);
+                const socketMat = new THREE.MeshStandardMaterial({
+                    color: colors.joint.main,
+                    emissive: colors.joint.emissive,
+                    roughness: 0.5,
+                    metalness: 0.1
+                });
+                const socket = new THREE.Mesh(socketGeo, socketMat);
+                socket.position.copy(hipJoint);
+                socket.rotation.x = Math.PI / 2;
+                socket.castShadow = true;
+                group.add(socket);
+            };
+
+            createIlium('left');
+            createIlium('right');
+
+            return group;
+        }
+
+        // ===== POLYGON SKELETON RENDERING =====
+
         function createPolygonJoint(position, size, colorType) {
-            const colors = COLORS.polygon;
+            const colors = BONE_COLORS.polygon;
             const color = colors[colorType] || colors.joint;
 
-            // Octahedron for diamond/crystal look
             const geo = new THREE.OctahedronGeometry(size, 0);
             const mat = new THREE.MeshStandardMaterial({
                 color: color.main,
@@ -261,8 +523,6 @@
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.copy(position);
             mesh.castShadow = true;
-
-            // Random rotation for variety
             mesh.rotation.x = Math.random() * 0.3;
             mesh.rotation.z = Math.random() * 0.3;
 
@@ -270,7 +530,7 @@
         }
 
         function createPolygonBone(startPos, endPos, thickness, colorType) {
-            const colors = COLORS.polygon;
+            const colors = BONE_COLORS.polygon;
             const color = colors[colorType] || colors.core;
 
             const direction = new THREE.Vector3().subVectors(endPos, startPos);
@@ -278,70 +538,48 @@
             if (length < 0.001) return null;
 
             const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
-
-            // Create a wedge/prism shape for the bone
             const width = 0.025 * thickness;
             const depth = 0.015 * thickness;
 
-            // Custom geometry - flat polygon strip with triangular cross-section
             const geo = new THREE.BufferGeometry();
-
-            // Create vertices for a tapered prism
             const halfLen = 0.5;
-            const taperStart = 0.7;  // Start wider
-            const taperEnd = 0.5;    // End narrower
+            const taperStart = 0.7;
+            const taperEnd = 0.5;
 
             const vertices = new Float32Array([
-                // Front face (2 triangles)
                 -width * taperStart, -halfLen, depth * taperStart,
                 width * taperStart, -halfLen, depth * taperStart,
                 width * taperEnd, halfLen, depth * taperEnd,
-
                 -width * taperStart, -halfLen, depth * taperStart,
                 width * taperEnd, halfLen, depth * taperEnd,
                 -width * taperEnd, halfLen, depth * taperEnd,
-
-                // Back face
                 width * taperStart, -halfLen, -depth * taperStart,
                 -width * taperStart, -halfLen, -depth * taperStart,
                 -width * taperEnd, halfLen, -depth * taperEnd,
-
                 width * taperStart, -halfLen, -depth * taperStart,
                 -width * taperEnd, halfLen, -depth * taperEnd,
                 width * taperEnd, halfLen, -depth * taperEnd,
-
-                // Left face
                 -width * taperStart, -halfLen, -depth * taperStart,
                 -width * taperStart, -halfLen, depth * taperStart,
                 -width * taperEnd, halfLen, depth * taperEnd,
-
                 -width * taperStart, -halfLen, -depth * taperStart,
                 -width * taperEnd, halfLen, depth * taperEnd,
                 -width * taperEnd, halfLen, -depth * taperEnd,
-
-                // Right face
                 width * taperStart, -halfLen, depth * taperStart,
                 width * taperStart, -halfLen, -depth * taperStart,
                 width * taperEnd, halfLen, -depth * taperEnd,
-
                 width * taperStart, -halfLen, depth * taperStart,
                 width * taperEnd, halfLen, -depth * taperEnd,
                 width * taperEnd, halfLen, depth * taperEnd,
-
-                // Bottom cap
                 -width * taperStart, -halfLen, -depth * taperStart,
                 width * taperStart, -halfLen, -depth * taperStart,
                 width * taperStart, -halfLen, depth * taperStart,
-
                 -width * taperStart, -halfLen, -depth * taperStart,
                 width * taperStart, -halfLen, depth * taperStart,
                 -width * taperStart, -halfLen, depth * taperStart,
-
-                // Top cap
                 -width * taperEnd, halfLen, depth * taperEnd,
                 width * taperEnd, halfLen, depth * taperEnd,
                 width * taperEnd, halfLen, -depth * taperEnd,
-
                 -width * taperEnd, halfLen, depth * taperEnd,
                 width * taperEnd, halfLen, -depth * taperEnd,
                 -width * taperEnd, halfLen, -depth * taperEnd,
@@ -364,7 +602,6 @@
             mesh.scale.y = length;
             mesh.castShadow = true;
 
-            // Orient bone along direction
             const axis = new THREE.Vector3(0, 1, 0);
             const quaternion = new THREE.Quaternion();
             quaternion.setFromUnitVectors(axis, direction.normalize());
@@ -373,8 +610,10 @@
             return mesh;
         }
 
+        // ===== CYLINDER SKELETON RENDERING =====
+
         function createCylinderJoint(position, size, colorType) {
-            const colors = COLORS.cylinder;
+            const colors = BONE_COLORS.cylinder;
             const color = colors[colorType] || colors.joint;
 
             const geo = new THREE.SphereGeometry(size, 16, 12);
@@ -395,7 +634,7 @@
         }
 
         function createCylinderBone(startPos, endPos, thickness, colorType) {
-            const colors = COLORS.cylinder;
+            const colors = BONE_COLORS.cylinder;
             const color = colors[colorType] || colors.core;
 
             const direction = new THREE.Vector3().subVectors(endPos, startPos);
@@ -403,7 +642,6 @@
             if (length < 0.001) return null;
 
             const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
-
             const baseRadius = 0.035;
             const topRadius = baseRadius * thickness;
             const bottomRadius = baseRadius * thickness * 0.85;
@@ -431,100 +669,16 @@
             return mesh;
         }
 
-        function createTorsoPolygon() {
-            // Create polygonal torso connecting shoulders and hips
-            const leftShoulder = jointPositions[11];
-            const rightShoulder = jointPositions[14];
-            const leftHip = jointPositions[4];
-            const rightHip = jointPositions[1];
-            const spine = jointPositions[8];
-            const pelvis = jointPositions[0];
-
-            const colors = COLORS[currentMode];
-            const color = colors.core;
-
-            // Front and back depth offset
-            const frontOffset = new THREE.Vector3(0, 0, 0.03);
-            const backOffset = new THREE.Vector3(0, 0, -0.03);
-
-            const vertices = new Float32Array([
-                // Front torso - upper triangle
-                leftShoulder.x + frontOffset.x, leftShoulder.y + frontOffset.y, leftShoulder.z + frontOffset.z,
-                rightShoulder.x + frontOffset.x, rightShoulder.y + frontOffset.y, rightShoulder.z + frontOffset.z,
-                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
-
-                // Front torso - middle quad (2 triangles)
-                leftShoulder.x + frontOffset.x, leftShoulder.y + frontOffset.y, leftShoulder.z + frontOffset.z,
-                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
-                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
-
-                rightShoulder.x + frontOffset.x, rightShoulder.y + frontOffset.y, rightShoulder.z + frontOffset.z,
-                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
-                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
-
-                // Front torso - lower triangle
-                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
-                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
-                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
-
-                // Lower pelvis triangle
-                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
-                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
-                pelvis.x + frontOffset.x, pelvis.y + frontOffset.y, pelvis.z + frontOffset.z,
-
-                // Back torso (mirrored)
-                rightShoulder.x + backOffset.x, rightShoulder.y + backOffset.y, rightShoulder.z + backOffset.z,
-                leftShoulder.x + backOffset.x, leftShoulder.y + backOffset.y, leftShoulder.z + backOffset.z,
-                spine.x + backOffset.x, spine.y + backOffset.y, spine.z + backOffset.z,
-
-                spine.x + backOffset.x, spine.y + backOffset.y, spine.z + backOffset.z,
-                leftShoulder.x + backOffset.x, leftShoulder.y + backOffset.y, leftShoulder.z + backOffset.z,
-                leftHip.x + backOffset.x, leftHip.y + backOffset.y, leftHip.z + backOffset.z,
-
-                spine.x + backOffset.x, spine.y + backOffset.y, spine.z + backOffset.z,
-                rightHip.x + backOffset.x, rightHip.y + backOffset.y, rightHip.z + backOffset.z,
-                rightShoulder.x + backOffset.x, rightShoulder.y + backOffset.y, rightShoulder.z + backOffset.z,
-
-                rightHip.x + backOffset.x, rightHip.y + backOffset.y, rightHip.z + backOffset.z,
-                spine.x + backOffset.x, spine.y + backOffset.y, spine.z + backOffset.z,
-                leftHip.x + backOffset.x, leftHip.y + backOffset.y, leftHip.z + backOffset.z,
-
-                rightHip.x + backOffset.x, rightHip.y + backOffset.y, rightHip.z + backOffset.z,
-                leftHip.x + backOffset.x, leftHip.y + backOffset.y, leftHip.z + backOffset.z,
-                pelvis.x + backOffset.x, pelvis.y + backOffset.y, pelvis.z + backOffset.z,
-            ]);
-
-            const geo = new THREE.BufferGeometry();
-            geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            geo.computeVertexNormals();
-
-            const mat = new THREE.MeshStandardMaterial({
-                color: color.main,
-                emissive: color.emissive,
-                roughness: 0.5,
-                metalness: 0.2,
-                flatShading: true,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.7
-            });
-
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.castShadow = true;
-
-            return mesh;
-        }
+        // ===== MAIN UPDATE FUNCTION =====
 
         function updateSkeleton(pose, updateHistory = true) {
             if (!pose || pose.length < 17) return;
 
-            // Update pose history
             if (updateHistory) {
                 poseHistory.unshift(JSON.parse(JSON.stringify(pose)));
                 if (poseHistory.length > 4) poseHistory.pop();
             }
 
-            // Clear existing skeleton
             clearSkeleton();
 
             // Compute joint positions
@@ -539,17 +693,74 @@
                 validJoints[i] = true;
             }
 
-            // Create bones first (so joints render on top)
+            if (currentMode === 'anatomical') {
+                renderAnatomicalSkeleton(validJoints);
+            } else if (currentMode === 'polygon') {
+                renderPolygonSkeleton(validJoints);
+            } else {
+                renderCylinderSkeleton(validJoints);
+            }
+        }
+
+        function renderAnatomicalSkeleton(validJoints) {
+            // Create bones
             for (const conn of SKELETON_CONNECTIONS) {
                 const [start, end] = conn.joints;
                 if (!validJoints[start] || !validJoints[end]) continue;
 
-                let bone;
-                if (currentMode === 'polygon') {
-                    bone = createPolygonBone(jointPositions[start], jointPositions[end], conn.thick, conn.type);
-                } else {
-                    bone = createCylinderBone(jointPositions[start], jointPositions[end], conn.thick, conn.type);
-                }
+                // Skip head bone - we'll render a skull instead
+                if (conn.bone === 'skull') continue;
+
+                const bone = createAnatomicalBone(
+                    jointPositions[start],
+                    jointPositions[end],
+                    conn.thick,
+                    conn.bone
+                );
+                if (bone) skeletonGroup.add(bone);
+            }
+
+            // Create joints (smaller, subtle)
+            for (let i = 0; i < 17; i++) {
+                if (!validJoints[i]) continue;
+                if (i === 10) continue; // Skip head - render skull instead
+
+                const size = (JOINT_SIZES[i] || 0.035) * 0.6;
+                const joint = createAnatomicalJoint(jointPositions[i], size, 'joint');
+                skeletonGroup.add(joint);
+            }
+
+            // Create skull at head position
+            if (validJoints[10]) {
+                const skull = createAnatomicalSkull(jointPositions[10], 0.09);
+                skeletonGroup.add(skull);
+            }
+
+            // Create ribcage
+            if (validJoints[0] && validJoints[8] && validJoints[11] && validJoints[14]) {
+                const ribcage = createAnatomicalRibcage();
+                skeletonGroup.add(ribcage);
+            }
+
+            // Create pelvis
+            if (validJoints[0] && validJoints[1] && validJoints[4]) {
+                const pelvis = createAnatomicalPelvis();
+                skeletonGroup.add(pelvis);
+            }
+        }
+
+        function renderPolygonSkeleton(validJoints) {
+            // Create bones
+            for (const conn of SKELETON_CONNECTIONS) {
+                const [start, end] = conn.joints;
+                if (!validJoints[start] || !validJoints[end]) continue;
+
+                const bone = createPolygonBone(
+                    jointPositions[start],
+                    jointPositions[end],
+                    conn.thick,
+                    conn.type
+                );
                 if (bone) skeletonGroup.add(bone);
             }
 
@@ -563,111 +774,108 @@
             for (let i = 0; i < 17; i++) {
                 if (!validJoints[i]) continue;
 
-                // Determine color type based on joint
                 let colorType = 'joint';
                 if (i === 10) colorType = 'head';
                 else if (i >= 11 && i <= 16) colorType = 'arm';
                 else if (i >= 1 && i <= 6) colorType = 'leg';
                 else if (i === 0 || i === 7 || i === 8 || i === 9) colorType = 'core';
 
-                let joint;
-                if (currentMode === 'polygon') {
-                    const size = POLY_JOINT_SIZES[i] || 0.05;
-                    joint = createPolygonJoint(jointPositions[i], size, colorType);
-                } else {
-                    const size = JOINT_SIZES[i] || 0.035;
-                    joint = createCylinderJoint(jointPositions[i], size, colorType);
-                }
+                const size = (JOINT_SIZES[i] || 0.05) * 1.2;
+                const joint = createPolygonJoint(jointPositions[i], size, colorType);
                 skeletonGroup.add(joint);
-            }
-
-            // Add motion trail (ghost frames) for polygon mode
-            if (currentMode === 'polygon') {
-                createGhostFrames(validJoints);
             }
         }
 
-        function createGhostFrames(currentValidJoints) {
-            // Create 2 ghost frames
-            for (let g = 0; g < 2; g++) {
-                const historyIdx = g + 1;
-                if (historyIdx >= poseHistory.length) continue;
+        function renderCylinderSkeleton(validJoints) {
+            // Create bones
+            for (const conn of SKELETON_CONNECTIONS) {
+                const [start, end] = conn.joints;
+                if (!validJoints[start] || !validJoints[end]) continue;
 
-                const historicalPose = poseHistory[historyIdx];
-                const opacity = 0.2 - g * 0.08;
+                // Skip neck-to-head for cylinder mode
+                if (start === 9 && end === 10) continue;
 
-                const ghostPositions = [];
-                const ghostValid = [];
-
-                for (let i = 0; i < Math.min(17, historicalPose.length); i++) {
-                    const [x, y, z] = historicalPose[i];
-                    if (Math.abs(x) > 5 || Math.abs(y) > 5 || Math.abs(z) > 5) {
-                        ghostValid[i] = false;
-                        ghostPositions[i] = new THREE.Vector3();
-                        continue;
-                    }
-                    ghostPositions[i] = new THREE.Vector3(x, z, -y);
-                    ghostValid[i] = true;
-                }
-
-                // Ghost bones
-                for (const conn of SKELETON_CONNECTIONS) {
-                    const [start, end] = conn.joints;
-                    if (!ghostValid[start] || !ghostValid[end]) continue;
-
-                    const direction = new THREE.Vector3().subVectors(ghostPositions[end], ghostPositions[start]);
-                    const length = direction.length();
-                    if (length < 0.001) continue;
-
-                    const midPoint = new THREE.Vector3().addVectors(ghostPositions[start], ghostPositions[end]).multiplyScalar(0.5);
-                    const width = 0.012 * conn.thick;
-
-                    const geo = new THREE.CylinderGeometry(width, width * 0.8, 1, 4);
-                    const mat = new THREE.MeshBasicMaterial({
-                        color: 0xaa4444,
-                        transparent: true,
-                        opacity: opacity
-                    });
-
-                    const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(midPoint);
-                    mesh.scale.y = length;
-
-                    const axis = new THREE.Vector3(0, 1, 0);
-                    const quaternion = new THREE.Quaternion();
-                    quaternion.setFromUnitVectors(axis, direction.normalize());
-                    mesh.quaternion.copy(quaternion);
-
-                    skeletonGroup.add(mesh);
-                }
-
-                // Ghost joints
-                for (let i = 0; i < 17; i++) {
-                    if (!ghostValid[i]) continue;
-
-                    const size = (POLY_JOINT_SIZES[i] || 0.05) * 0.6;
-                    const geo = new THREE.OctahedronGeometry(size, 0);
-                    const mat = new THREE.MeshBasicMaterial({
-                        color: 0xcc5555,
-                        transparent: true,
-                        opacity: opacity
-                    });
-
-                    const mesh = new THREE.Mesh(geo, mat);
-                    mesh.position.copy(ghostPositions[i]);
-                    skeletonGroup.add(mesh);
-                }
+                const bone = createCylinderBone(
+                    jointPositions[start],
+                    jointPositions[end],
+                    conn.thick,
+                    conn.type
+                );
+                if (bone) skeletonGroup.add(bone);
             }
+
+            // Create joints
+            for (let i = 0; i < 17; i++) {
+                if (!validJoints[i]) continue;
+
+                let colorType = 'joint';
+                if (i === 10) colorType = 'head';
+                else if (i >= 11 && i <= 16) colorType = 'arm';
+                else if (i >= 1 && i <= 6) colorType = 'leg';
+
+                const size = JOINT_SIZES[i] || 0.035;
+                const joint = createCylinderJoint(jointPositions[i], size, colorType);
+                skeletonGroup.add(joint);
+            }
+        }
+
+        function createTorsoPolygon() {
+            const leftShoulder = jointPositions[11];
+            const rightShoulder = jointPositions[14];
+            const leftHip = jointPositions[4];
+            const rightHip = jointPositions[1];
+            const spine = jointPositions[8];
+            const pelvis = jointPositions[0];
+
+            const colors = BONE_COLORS[currentMode] || BONE_COLORS.polygon;
+            const color = colors.core || colors.bone;
+
+            const frontOffset = new THREE.Vector3(0, 0, 0.03);
+            const backOffset = new THREE.Vector3(0, 0, -0.03);
+
+            const vertices = new Float32Array([
+                leftShoulder.x + frontOffset.x, leftShoulder.y + frontOffset.y, leftShoulder.z + frontOffset.z,
+                rightShoulder.x + frontOffset.x, rightShoulder.y + frontOffset.y, rightShoulder.z + frontOffset.z,
+                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
+                leftShoulder.x + frontOffset.x, leftShoulder.y + frontOffset.y, leftShoulder.z + frontOffset.z,
+                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
+                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
+                rightShoulder.x + frontOffset.x, rightShoulder.y + frontOffset.y, rightShoulder.z + frontOffset.z,
+                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
+                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
+                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
+                spine.x + frontOffset.x, spine.y + frontOffset.y, spine.z + frontOffset.z,
+                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
+                leftHip.x + frontOffset.x, leftHip.y + frontOffset.y, leftHip.z + frontOffset.z,
+                rightHip.x + frontOffset.x, rightHip.y + frontOffset.y, rightHip.z + frontOffset.z,
+                pelvis.x + frontOffset.x, pelvis.y + frontOffset.y, pelvis.z + frontOffset.z,
+            ]);
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geo.computeVertexNormals();
+
+            const mat = new THREE.MeshStandardMaterial({
+                color: color.main,
+                emissive: color.emissive,
+                roughness: 0.5,
+                metalness: 0.2,
+                flatShading: true,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.6
+            });
+
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            return mesh;
         }
 
         function handleMessage(event) {
             const data = event.data;
             if (!data) return;
 
-            console.log('Skeleton viewer received message:', data.type);
-
             if (data.type === 'setPoses') {
-                console.log('Setting poses, count:', data.poses ? data.poses.length : 0);
                 poses = data.poses || [];
                 currentFrame = 0;
                 if (poses.length > 0) {
@@ -702,16 +910,11 @@
             renderer.render(scene, camera);
         }
 
-        // Start
         init();
 
-        // Notify parent we're ready and request poses
         window.addEventListener('load', function() {
-            console.log('Skeleton viewer ready, notifying parent');
-
             function tryGetPoses() {
                 if (window.parent.skeletonPoses && window.parent.skeletonPoses.length > 0) {
-                    console.log('Found poses in parent:', window.parent.skeletonPoses.length, 'frames');
                     poses = window.parent.skeletonPoses;
                     currentFrame = window.parent.skeletonFrame || 0;
                     updateSkeleton(poses[currentFrame]);
@@ -722,7 +925,6 @@
 
             if (!tryGetPoses()) {
                 window.parent.postMessage({type: 'skeletonReady'}, '*');
-
                 var retries = 0;
                 var retryInterval = setInterval(function() {
                     if (tryGetPoses() || retries > 50) {
