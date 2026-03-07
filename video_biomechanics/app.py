@@ -944,21 +944,32 @@ app.clientside_callback(
 )
 
 
-# Clientside callback to update frame when slider changes
+# Clientside callback to update skeleton AND video when slider changes
 app.clientside_callback(
     """
-    function(frameIdx) {
+    function(frameIdx, fpsText) {
         window.skeletonFrame = frameIdx;
-        console.log('Slider changed, frame:', frameIdx);
+
+        // Update skeleton iframe
         var iframe = document.getElementById('threejs-skeleton');
         if (iframe && iframe.contentWindow) {
             iframe.contentWindow.postMessage({type: 'setFrame', frame: frameIdx}, '*');
         }
+
+        // Sync video player currentTime
+        var fps = parseFloat(fpsText) || 30;
+        var videoTime = frameIdx / fps;
+        var video = document.getElementById('viz-video-player');
+        if (video && Math.abs(video.currentTime - videoTime) > 0.05) {
+            video.currentTime = videoTime;
+        }
+
         return window.dash_clientside.no_update;
     }
     """,
     Output('clientside-output-dummy', 'title'),
-    Input('frame-slider', 'value'),
+    [Input('frame-slider', 'value'),
+     Input('fps-holder', 'children')],
     prevent_initial_call=True
 )
 
@@ -1622,12 +1633,16 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
         except Exception:
             pass
 
+    # Get FPS from results
+    fps = results.get('fps', 30)
+
     # UPLIFT-style layout with Three.js iframe and video overlay
     # Note: poses_json is embedded in a hidden div for the clientside callback to find
     return html.Div([
-        # Hidden div containing poses JSON for clientside callback to parse
+        # Hidden divs for clientside callbacks
         html.Div(id='poses-json-holder', children=poses_json, style={'display': 'none'}),
         html.Div(id='frame-idx-holder', children=str(frame_idx), style={'display': 'none'}),
+        html.Div(id='fps-holder', children=str(fps), style={'display': 'none'}),
 
         dbc.Row([
             # Left side - stacked graphs (narrower)
@@ -1657,13 +1672,14 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
                         html.Video(
                             id='viz-video-player',
                             src=video_src,
-                            controls=True,
+                            controls=False,  # Disabled - use main slider for sync
                             muted=True,
                             style={
                                 'width': '100%',
                                 'maxHeight': '140px',
                                 'borderRadius': '6px',
-                                'backgroundColor': '#000'
+                                'backgroundColor': '#000',
+                                'pointerEvents': 'none'  # Prevent clicking
                             }
                         )
                     ], style={

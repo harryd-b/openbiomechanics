@@ -9,7 +9,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #1e1e32;
+            background: #0a0a18;
         }
         #skeleton-container {
             width: 100%;
@@ -25,26 +25,61 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <script>
-        // H36M skeleton connections
+        // H36M skeleton connections with thickness multipliers
         const SKELETON_CONNECTIONS = [
-            [0, 7], [7, 8], [8, 9], [9, 10],  // Spine
-            [8, 11], [11, 12], [12, 13],      // Left arm
-            [8, 14], [14, 15], [15, 16],      // Right arm
-            [0, 4], [4, 5], [5, 6],           // Left leg
-            [0, 1], [1, 2], [2, 3],           // Right leg
+            // [start, end, thickness multiplier, color type]
+            { joints: [0, 7], thick: 1.8, type: 'core' },    // Hip to spine
+            { joints: [7, 8], thick: 1.6, type: 'core' },    // Spine
+            { joints: [8, 9], thick: 1.2, type: 'core' },    // Neck
+            { joints: [9, 10], thick: 0.8, type: 'core' },   // Head
+            { joints: [8, 11], thick: 1.3, type: 'arm' },    // Left shoulder
+            { joints: [11, 12], thick: 1.0, type: 'arm' },   // Left upper arm
+            { joints: [12, 13], thick: 0.7, type: 'arm' },   // Left forearm
+            { joints: [8, 14], thick: 1.3, type: 'arm' },    // Right shoulder
+            { joints: [14, 15], thick: 1.0, type: 'arm' },   // Right upper arm
+            { joints: [15, 16], thick: 0.7, type: 'arm' },   // Right forearm
+            { joints: [0, 4], thick: 1.5, type: 'leg' },     // Left hip
+            { joints: [4, 5], thick: 1.3, type: 'leg' },     // Left thigh
+            { joints: [5, 6], thick: 0.9, type: 'leg' },     // Left shin
+            { joints: [0, 1], thick: 1.5, type: 'leg' },     // Right hip
+            { joints: [1, 2], thick: 1.3, type: 'leg' },     // Right thigh
+            { joints: [2, 3], thick: 0.9, type: 'leg' },     // Right shin
         ];
 
+        // Joint sizes (some joints are more prominent)
+        const JOINT_SIZES = {
+            0: 0.06,   // Hip - large
+            1: 0.04, 2: 0.04, 3: 0.03,  // Right leg
+            4: 0.04, 5: 0.04, 6: 0.03,  // Left leg
+            7: 0.05, 8: 0.05,           // Spine
+            9: 0.04, 10: 0.12,          // Neck, Head (large sphere)
+            11: 0.045, 12: 0.04, 13: 0.03,  // Left arm
+            14: 0.045, 15: 0.04, 16: 0.03,  // Right arm
+        };
+
+        // Color palette (UPLIFT-style cyan/blue)
+        const COLORS = {
+            core: { main: 0x00d4ff, emissive: 0x004466 },
+            arm: { main: 0x00aadd, emissive: 0x003344 },
+            leg: { main: 0x0088bb, emissive: 0x002233 },
+            joint: { main: 0x00ffff, emissive: 0x006666 },
+            head: { main: 0x00eeff, emissive: 0x005566 },
+        };
+
         let scene, camera, renderer, controls;
-        let joints = [], bones = [];
+        let joints = [], bones = [], torsoMesh = null, headMesh = null;
+        let ghostJoints = [], ghostBones = [];  // Motion trail
         let poses = [];
         let currentFrame = 0;
+        let poseHistory = [];  // Store recent poses for motion trail
 
         function init() {
             const container = document.getElementById('skeleton-container');
 
-            // Scene
+            // Scene with fog for depth
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1e1e32);
+            scene.background = new THREE.Color(0x0a0a18);
+            scene.fog = new THREE.Fog(0x0a0a18, 4, 12);
 
             // Camera
             const aspect = container.clientWidth / container.clientHeight;
@@ -58,11 +93,12 @@
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer.domElement);
 
-            // Lights
-            const ambient = new THREE.AmbientLight(0x606080, 0.6);
+            // Lights - enhanced for more dramatic look
+            const ambient = new THREE.AmbientLight(0x303050, 0.4);
             scene.add(ambient);
 
-            const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+            // Main key light
+            const directional = new THREE.DirectionalLight(0xffffff, 0.9);
             directional.position.set(5, 10, 5);
             directional.castShadow = true;
             directional.shadow.mapSize.width = 2048;
@@ -70,6 +106,21 @@
             directional.shadow.camera.near = 0.5;
             directional.shadow.camera.far = 50;
             scene.add(directional);
+
+            // Rim light for depth (back lighting)
+            const rimLight = new THREE.DirectionalLight(0x00aaff, 0.5);
+            rimLight.position.set(-3, 5, -5);
+            scene.add(rimLight);
+
+            // Fill light from below for dramatic effect
+            const fillLight = new THREE.PointLight(0x0066aa, 0.3);
+            fillLight.position.set(0, 0.5, 2);
+            scene.add(fillLight);
+
+            // Accent light
+            const accentLight = new THREE.PointLight(0x00ffff, 0.2);
+            accentLight.position.set(2, 2, -2);
+            scene.add(accentLight);
 
             // Floor grid
             createFloor();
@@ -105,33 +156,49 @@
         }
 
         function createFloor() {
-            const gridSize = 5;
-            const gridDivisions = 25;
+            const gridSize = 6;
+            const gridDivisions = 30;
 
-            // Main grid
-            const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x555577, 0x333355);
+            // Main grid with cyan tint
+            const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x004466, 0x002233);
             gridHelper.position.y = 0;
             scene.add(gridHelper);
 
-            // Make grid fade at edges
+            // Make grid subtle
             const material = gridHelper.material;
             if (material) {
                 material.transparent = true;
-                material.opacity = 0.6;
+                material.opacity = 0.4;
             }
+
+            // Add a subtle center marker
+            const centerGeo = new THREE.RingGeometry(0.08, 0.1, 32);
+            const centerMat = new THREE.MeshBasicMaterial({
+                color: 0x00aaff,
+                transparent: true,
+                opacity: 0.3,
+                side: THREE.DoubleSide
+            });
+            const centerRing = new THREE.Mesh(centerGeo, centerMat);
+            centerRing.rotation.x = -Math.PI / 2;
+            centerRing.position.y = 0.002;
+            scene.add(centerRing);
         }
 
         function createSkeleton() {
-            // Joint spheres (diamond shape like UPLIFT)
-            const jointGeo = new THREE.OctahedronGeometry(0.03);
-            const jointMat = new THREE.MeshStandardMaterial({
-                color: 0xff5555,
-                emissive: 0x441111,
-                roughness: 0.3,
-                metalness: 0.2
-            });
-
+            // Joint spheres with varying sizes
             for (let i = 0; i < 17; i++) {
+                const size = JOINT_SIZES[i] || 0.035;
+                const jointGeo = new THREE.SphereGeometry(size, 16, 12);
+                const jointMat = new THREE.MeshStandardMaterial({
+                    color: i === 10 ? COLORS.head.main : COLORS.joint.main,
+                    emissive: i === 10 ? COLORS.head.emissive : COLORS.joint.emissive,
+                    roughness: 0.2,
+                    metalness: 0.3,
+                    transparent: true,
+                    opacity: 0.95
+                });
+
                 const joint = new THREE.Mesh(jointGeo, jointMat);
                 joint.castShadow = true;
                 joint.visible = false;
@@ -139,26 +206,109 @@
                 scene.add(joint);
             }
 
-            // Bones
-            const boneMat = new THREE.MeshStandardMaterial({
-                color: 0xcc3333,
-                emissive: 0x331111,
-                roughness: 0.4,
-                metalness: 0.1
-            });
+            // Bones with capsule-like appearance and varying thickness
+            const baseRadius = 0.02;
 
-            for (const [start, end] of SKELETON_CONNECTIONS) {
-                const boneGeo = new THREE.CylinderGeometry(0.015, 0.015, 1, 8);
+            for (const conn of SKELETON_CONNECTIONS) {
+                const [start, end] = conn.joints;
+                const thickness = conn.thick;
+                const colorType = conn.type;
+
+                // Tapered cylinder for more organic look
+                const topRadius = baseRadius * thickness;
+                const bottomRadius = baseRadius * thickness * 0.85;
+                const boneGeo = new THREE.CylinderGeometry(topRadius, bottomRadius, 1, 12);
+
+                const boneMat = new THREE.MeshStandardMaterial({
+                    color: COLORS[colorType].main,
+                    emissive: COLORS[colorType].emissive,
+                    roughness: 0.25,
+                    metalness: 0.2,
+                    transparent: true,
+                    opacity: 0.9
+                });
+
                 const bone = new THREE.Mesh(boneGeo, boneMat);
                 bone.castShadow = true;
                 bone.visible = false;
-                bones.push({ mesh: bone, start, end });
+                bones.push({ mesh: bone, start, end, thickness });
                 scene.add(bone);
+            }
+
+            // Create torso mesh (connects shoulders and hips)
+            createTorso();
+
+            // Create motion trail (ghost skeleton)
+            createGhostSkeleton();
+        }
+
+        function createTorso() {
+            // Torso will be updated dynamically based on joint positions
+            const torsoGeo = new THREE.BufferGeometry();
+            const torsoMat = new THREE.MeshStandardMaterial({
+                color: COLORS.core.main,
+                emissive: COLORS.core.emissive,
+                roughness: 0.3,
+                metalness: 0.2,
+                transparent: true,
+                opacity: 0.4,
+                side: THREE.DoubleSide
+            });
+            torsoMesh = new THREE.Mesh(torsoGeo, torsoMat);
+            torsoMesh.visible = false;
+            scene.add(torsoMesh);
+        }
+
+        function createGhostSkeleton() {
+            // Create 3 ghost frames for motion trail
+            for (let g = 0; g < 3; g++) {
+                const ghostOpacity = 0.15 - g * 0.04;
+                const frameJoints = [];
+                const frameBones = [];
+
+                // Ghost joints
+                for (let i = 0; i < 17; i++) {
+                    const size = (JOINT_SIZES[i] || 0.035) * 0.7;
+                    const jointGeo = new THREE.SphereGeometry(size, 8, 6);
+                    const jointMat = new THREE.MeshBasicMaterial({
+                        color: 0x00ffff,
+                        transparent: true,
+                        opacity: ghostOpacity
+                    });
+                    const joint = new THREE.Mesh(jointGeo, jointMat);
+                    joint.visible = false;
+                    frameJoints.push(joint);
+                    scene.add(joint);
+                }
+                ghostJoints.push(frameJoints);
+
+                // Ghost bones
+                const frameBonesList = [];
+                for (const conn of SKELETON_CONNECTIONS) {
+                    const [start, end] = conn.joints;
+                    const boneGeo = new THREE.CylinderGeometry(0.008, 0.008, 1, 6);
+                    const boneMat = new THREE.MeshBasicMaterial({
+                        color: 0x00aacc,
+                        transparent: true,
+                        opacity: ghostOpacity
+                    });
+                    const bone = new THREE.Mesh(boneGeo, boneMat);
+                    bone.visible = false;
+                    frameBonesList.push({ mesh: bone, start, end });
+                    scene.add(bone);
+                }
+                ghostBones.push(frameBonesList);
             }
         }
 
-        function updateSkeleton(pose) {
+        function updateSkeleton(pose, updateHistory = true) {
             if (!pose || pose.length < 17) return;
+
+            // Update pose history for motion trail
+            if (updateHistory) {
+                poseHistory.unshift(JSON.parse(JSON.stringify(pose)));
+                if (poseHistory.length > 4) poseHistory.pop();
+            }
 
             // Update joints
             for (let i = 0; i < Math.min(17, pose.length); i++) {
@@ -199,6 +349,105 @@
                 const quaternion = new THREE.Quaternion();
                 quaternion.setFromUnitVectors(axis, direction.normalize());
                 bone.mesh.quaternion.copy(quaternion);
+            }
+
+            // Update torso mesh
+            updateTorso();
+
+            // Update ghost skeleton (motion trail)
+            updateGhostSkeletons();
+        }
+
+        function updateTorso() {
+            // Create torso shape from shoulders (11, 14) and hips (1, 4)
+            const leftShoulder = joints[11];
+            const rightShoulder = joints[14];
+            const leftHip = joints[4];
+            const rightHip = joints[1];
+            const spine = joints[8];
+
+            if (!leftShoulder.visible || !rightShoulder.visible ||
+                !leftHip.visible || !rightHip.visible || !spine.visible) {
+                torsoMesh.visible = false;
+                return;
+            }
+
+            // Create convex hull-like shape for torso
+            const vertices = new Float32Array([
+                // Front face (shoulders to hips)
+                leftShoulder.position.x, leftShoulder.position.y, leftShoulder.position.z,
+                rightShoulder.position.x, rightShoulder.position.y, rightShoulder.position.z,
+                rightHip.position.x, rightHip.position.y, rightHip.position.z,
+
+                leftShoulder.position.x, leftShoulder.position.y, leftShoulder.position.z,
+                rightHip.position.x, rightHip.position.y, rightHip.position.z,
+                leftHip.position.x, leftHip.position.y, leftHip.position.z,
+
+                // Include spine for depth
+                leftShoulder.position.x, leftShoulder.position.y, leftShoulder.position.z,
+                spine.position.x, spine.position.y, spine.position.z,
+                rightShoulder.position.x, rightShoulder.position.y, rightShoulder.position.z,
+            ]);
+
+            torsoMesh.geometry.dispose();
+            torsoMesh.geometry = new THREE.BufferGeometry();
+            torsoMesh.geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            torsoMesh.geometry.computeVertexNormals();
+            torsoMesh.visible = true;
+        }
+
+        function updateGhostSkeletons() {
+            // Update ghost skeletons from pose history
+            for (let g = 0; g < ghostJoints.length; g++) {
+                const historyIdx = g + 1;  // Skip current frame
+                if (historyIdx >= poseHistory.length) {
+                    // Hide this ghost frame
+                    for (const joint of ghostJoints[g]) joint.visible = false;
+                    for (const bone of ghostBones[g]) bone.mesh.visible = false;
+                    continue;
+                }
+
+                const historicalPose = poseHistory[historyIdx];
+
+                // Update ghost joints
+                for (let i = 0; i < Math.min(17, historicalPose.length); i++) {
+                    const [x, y, z] = historicalPose[i];
+                    if (Math.abs(x) > 5 || Math.abs(y) > 5 || Math.abs(z) > 5) {
+                        ghostJoints[g][i].visible = false;
+                        continue;
+                    }
+                    ghostJoints[g][i].position.set(x, z, -y);
+                    ghostJoints[g][i].visible = true;
+                }
+
+                // Update ghost bones
+                for (const bone of ghostBones[g]) {
+                    const startJoint = ghostJoints[g][bone.start];
+                    const endJoint = ghostJoints[g][bone.end];
+
+                    if (!startJoint.visible || !endJoint.visible) {
+                        bone.mesh.visible = false;
+                        continue;
+                    }
+
+                    bone.mesh.position.copy(startJoint.position).add(endJoint.position).multiplyScalar(0.5);
+
+                    const direction = new THREE.Vector3().subVectors(endJoint.position, startJoint.position);
+                    const length = direction.length();
+
+                    if (length < 0.001) {
+                        bone.mesh.visible = false;
+                        continue;
+                    }
+
+                    bone.mesh.scale.y = length;
+                    bone.mesh.visible = true;
+
+                    const axis = new THREE.Vector3(0, 1, 0);
+                    const quaternion = new THREE.Quaternion();
+                    quaternion.setFromUnitVectors(axis, direction.normalize());
+                    bone.mesh.quaternion.copy(quaternion);
+                }
             }
         }
 
