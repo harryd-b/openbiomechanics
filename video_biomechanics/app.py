@@ -947,7 +947,7 @@ app.clientside_callback(
 # Clientside callback to update skeleton AND video when slider changes
 app.clientside_callback(
     """
-    function(frameIdx, fpsText) {
+    function(frameIdx, resultsData) {
         window.skeletonFrame = frameIdx;
 
         // Update skeleton iframe
@@ -957,7 +957,7 @@ app.clientside_callback(
         }
 
         // Sync video player currentTime
-        var fps = parseFloat(fpsText) || 30;
+        var fps = (resultsData && resultsData.fps) ? resultsData.fps : 30;
         var videoTime = frameIdx / fps;
         var video = document.getElementById('viz-video-player');
         if (video && Math.abs(video.currentTime - videoTime) > 0.05) {
@@ -969,7 +969,7 @@ app.clientside_callback(
     """,
     Output('clientside-output-dummy', 'title'),
     [Input('frame-slider', 'value'),
-     Input('fps-holder', 'children')],
+     Input('results-data', 'data')],
     prevent_initial_call=True
 )
 
@@ -1594,24 +1594,37 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
 
     # Prepare poses for Three.js viewer (fix coordinates)
     fixed_poses = []
+    last_good_head = None  # Track last good head position for interpolation
+
     for pose in poses_3d:
         if pose is None:
             fixed_poses.append([[0, 0, 0]] * 17)
             continue
         pose = pose.copy()
         max_reasonable = 5.0
+
+        # Fix bad joint values - use last good value or interpolate
         for j in range(len(pose)):
             if np.any(np.abs(pose[j]) > max_reasonable):
                 if j == 9 or j == 10:
-                    if len(pose) > 8 and np.all(np.abs(pose[8]) < max_reasonable):
+                    # Head/neck - use last good head position or estimate from spine
+                    if last_good_head is not None:
+                        pose[j] = last_good_head.copy()
+                    elif len(pose) > 8 and np.all(np.abs(pose[8]) < max_reasonable):
                         pose[j] = pose[8] + np.array([0, 0, 0.15])
                     else:
                         pose[j] = np.array([0, 0, 1.7])
                 else:
                     pose[j] = np.array([0, 0, 0])
+
+        # Track good head position for next frame
+        if np.all(np.abs(pose[10]) < max_reasonable):
+            last_good_head = pose[10].copy()
+
         # Fix coordinate system and center
+        # NEGATE X to flip horizontally (corrects right/left handedness)
         fixed = np.zeros_like(pose)
-        fixed[:, 0] = pose[:, 0]
+        fixed[:, 0] = -pose[:, 0]  # Flip X axis for correct handedness
         fixed[:, 1] = pose[:, 2]
         fixed[:, 2] = -pose[:, 1]
         fixed[:, 2] = fixed[:, 2] - fixed[:, 2].min() + 0.02
@@ -1633,16 +1646,12 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
         except Exception:
             pass
 
-    # Get FPS from results
-    fps = results.get('fps', 30)
-
     # UPLIFT-style layout with Three.js iframe and video overlay
     # Note: poses_json is embedded in a hidden div for the clientside callback to find
     return html.Div([
-        # Hidden divs for clientside callbacks
+        # Hidden divs for clientside callbacks (FPS comes from results-data store)
         html.Div(id='poses-json-holder', children=poses_json, style={'display': 'none'}),
         html.Div(id='frame-idx-holder', children=str(frame_idx), style={'display': 'none'}),
-        html.Div(id='fps-holder', children=str(fps), style={'display': 'none'}),
 
         dbc.Row([
             # Left side - stacked graphs (narrower)
