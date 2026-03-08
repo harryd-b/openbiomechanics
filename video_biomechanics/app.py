@@ -591,6 +591,51 @@ app.layout = dbc.Container([
                     ], className="mb-3"),
                     dbc.Row([
                         dbc.Col([
+                            html.Div("BAT LENGTH", className="metric-label mb-2"),
+                            dbc.Input(
+                                id='bat-length',
+                                type='number',
+                                value=33,
+                                min=28,
+                                max=36,
+                                step=0.5,
+                                style={'backgroundColor': '#1a1a2e', 'border': '1px solid #333',
+                                       'color': '#fff', 'borderRadius': '6px'}
+                            ),
+                            html.Div("Length in inches (for scale verification)", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=3),
+                        dbc.Col([
+                            html.Div("ATHLETE HEIGHT", className="metric-label mb-2"),
+                            dbc.Input(
+                                id='athlete-height',
+                                type='number',
+                                value=72,
+                                min=48,
+                                max=84,
+                                step=1,
+                                style={'backgroundColor': '#1a1a2e', 'border': '1px solid #333',
+                                       'color': '#fff', 'borderRadius': '6px'}
+                            ),
+                            html.Div("Height in inches (optional, for scale)", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=3),
+                        dbc.Col([
+                            html.Div("SCALE REFERENCE", className="metric-label mb-2"),
+                            dbc.RadioItems(
+                                id='scale-reference',
+                                options=[
+                                    {'label': ' Plate', 'value': 'plate'},
+                                    {'label': ' Bat', 'value': 'bat'},
+                                    {'label': ' Height', 'value': 'height'}
+                                ],
+                                value='plate',
+                                inline=True,
+                                className="text-light"
+                            ),
+                            html.Div("Method to calibrate scale", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=6),
+                    ], className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
                             html.Div("POSE METHODS", className="metric-label mb-2"),
                             dbc.Checklist(
                                 id='method-selector',
@@ -1824,10 +1869,14 @@ def save_uploaded_file(contents: str, filename: str, camera_num: int) -> str:
     State('camera-dist-1', 'value'),
     State('camera-dist-2', 'value'),
     State('method-selector', 'value'),
+    State('bat-length', 'value'),
+    State('athlete-height', 'value'),
+    State('scale-reference', 'value'),
     prevent_initial_call=True,
     background=False
 )
-def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, cam_dist_2, selected_methods):
+def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, cam_dist_2,
+                   selected_methods, bat_length_inches, athlete_height_inches, scale_reference):
     if n_clicks is None:
         raise PreventUpdate
 
@@ -1873,6 +1922,40 @@ def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, ca
 
         results = pipeline.process_videos(video_paths)
 
+        # Scale reference information
+        bat_length_m = (bat_length_inches or 33) * 0.0254  # Convert inches to meters
+        athlete_height_m = (athlete_height_inches or 72) * 0.0254  # Convert inches to meters
+
+        # Store scale reference info in results
+        results['scale_info'] = {
+            'reference': scale_reference or 'plate',
+            'bat_length_m': bat_length_m,
+            'bat_length_inches': bat_length_inches or 33,
+            'athlete_height_m': athlete_height_m,
+            'athlete_height_inches': athlete_height_inches or 72,
+        }
+
+        # Compute actual measurements from poses for scale verification
+        poses_3d = results.get('poses_3d', [])
+        if poses_3d and len(poses_3d) > 0:
+            poses_array = np.array(poses_3d)
+            # Measure ankle-to-head distance (proxy for height)
+            measured_height = np.nanmean(np.linalg.norm(
+                poses_array[:, 10] - poses_array[:, 6], axis=1))  # head - l_ankle
+
+            results['scale_info']['measured_height_m'] = float(measured_height)
+
+            # Compute scale factor if using bat or height reference
+            if scale_reference == 'bat':
+                # Would need bat tracking to compute this
+                print(f"[SCALE] Bat reference: {bat_length_inches}\" ({bat_length_m:.3f}m)")
+            elif scale_reference == 'height':
+                scale_factor = athlete_height_m / measured_height if measured_height > 0 else 1.0
+                results['scale_info']['scale_factor'] = float(scale_factor)
+                print(f"[SCALE] Height reference: target={athlete_height_m:.2f}m, measured={measured_height:.2f}m, factor={scale_factor:.3f}")
+            else:
+                print(f"[SCALE] Plate reference: measured height={measured_height:.2f}m")
+
         # Save results to files for analysis
         output_dir = Path('output')
         output_dir.mkdir(exist_ok=True)
@@ -1913,7 +1996,8 @@ def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, ca
             'n_frames': n_frames,
             'fps': results['fps'],
             'n_cameras': results['n_cameras'],
-            'bats': bats
+            'bats': bats,
+            'scale_info': results.get('scale_info', {}),
         }
 
         # Create slider marks
