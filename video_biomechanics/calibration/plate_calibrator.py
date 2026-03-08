@@ -1103,6 +1103,83 @@ class PlateCalibrator:
             return transformed[0]
         return transformed
 
+    def verify_scale_with_bat(self, poses_3d: np.ndarray,
+                               bat_length_m: float = 0.84) -> dict:
+        """
+        Verify skeleton scale using known bat length.
+
+        A baseball bat is typically 32-34 inches (0.81-0.86m).
+        An adult's ankle-to-head height is typically ~1.9-2.1x bat length.
+
+        Args:
+            poses_3d: Array of shape (n_frames, 17, 3) or (17, 3)
+            bat_length_m: Known bat length in meters (default 0.84m = 33")
+
+        Returns:
+            Dictionary with scale verification results
+        """
+        if poses_3d.ndim == 2:
+            poses_3d = poses_3d[np.newaxis, ...]
+
+        # Measure ankle-to-head height (joint 6 = l_ankle, joint 10 = head)
+        measured_height = np.nanmean(np.linalg.norm(
+            poses_3d[:, 10] - poses_3d[:, 6], axis=1))
+
+        # Expected body/bat ratio for adults is approximately 2.0
+        expected_ratio = 2.0
+        expected_height = bat_length_m * expected_ratio
+
+        actual_ratio = measured_height / bat_length_m if bat_length_m > 0 else 0
+        scale_error = (measured_height - expected_height) / expected_height if expected_height > 0 else 0
+
+        result = {
+            'bat_length_m': bat_length_m,
+            'measured_height_m': float(measured_height),
+            'expected_height_m': float(expected_height),
+            'body_bat_ratio': float(actual_ratio),
+            'expected_ratio': expected_ratio,
+            'scale_error_percent': float(scale_error * 100),
+            'scale_is_valid': abs(scale_error) < 0.15,  # Within 15% is OK
+        }
+
+        return result
+
+    def apply_scale_correction(self, poses_3d: np.ndarray,
+                                target_height_m: float = None,
+                                bat_length_m: float = None) -> np.ndarray:
+        """
+        Apply scale correction to poses using known reference.
+
+        Args:
+            poses_3d: Array of shape (n_frames, 17, 3) or (17, 3)
+            target_height_m: Target ankle-to-head height in meters
+            bat_length_m: Known bat length (uses expected ratio of 2.0)
+
+        Returns:
+            Scaled poses
+        """
+        single_pose = poses_3d.ndim == 2
+        if single_pose:
+            poses_3d = poses_3d[np.newaxis, ...]
+
+        # Compute current height
+        current_height = np.nanmean(np.linalg.norm(
+            poses_3d[:, 10] - poses_3d[:, 6], axis=1))
+
+        # Determine target height
+        if target_height_m is not None:
+            target = target_height_m
+        elif bat_length_m is not None:
+            target = bat_length_m * 2.0  # Expected body/bat ratio
+        else:
+            return poses_3d[0] if single_pose else poses_3d
+
+        # Compute and apply scale factor
+        scale_factor = target / current_height if current_height > 0 else 1.0
+        scaled = poses_3d * scale_factor
+
+        return scaled[0] if single_pose else scaled
+
     def process_pose(self, keypoints_side: np.ndarray,
                      keypoints_back: np.ndarray,
                      to_uplift_frame: bool = True) -> np.ndarray:
