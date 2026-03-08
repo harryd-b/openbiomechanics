@@ -1019,17 +1019,14 @@ class PlateCalibrator:
         """
         Transform triangulated poses to UPLIFT body-relative convention.
 
-        Our plate-based calibration produces poses in a consistent world frame:
-        - Origin: plate center
-        - X: toward 1st base
-        - Y: up
-        - Z: toward catcher (negative toward pitcher)
+        Uses body-axis alignment: computes the actual body orientation from the
+        skeleton and rotates to match UPLIFT's convention:
+        - X: LEFT direction (left_hip - right_hip = +X)
+        - Y: UP direction (head - pelvis = +Y)
+        - Z: FORWARD direction (cross product of X and Y)
 
-        UPLIFT uses body-relative axes where the batter faces a consistent direction.
-        This method:
-        1. Detects handedness from batter position (pelvis X before centering)
-        2. Rotates to body-relative frame based on handedness
-        3. Centers on pelvis
+        This approach is robust to camera position variations because it derives
+        the rotation from the skeleton itself rather than assuming fixed transforms.
 
         Args:
             poses_3d: Array of shape (n_frames, 17, 3) or (17, 3)
@@ -1046,45 +1043,51 @@ class PlateCalibrator:
 
         transformed = poses_3d.copy()
 
-        # Detect handedness from hip Z positions at first frame
-        # In plate coords: Z+ = toward pitcher
-        # Right-handed batter: left hip is "front" (closer to pitcher)
-        #   -> left_hip_z > right_hip_z
-        # Left-handed batter: right hip is "front" (closer to pitcher)
-        #   -> right_hip_z > left_hip_z
-        # Joint indices: left_hip=4, right_hip=1
-        left_hip_z = transformed[0, 4, 2]   # Z coord of left hip
-        right_hip_z = transformed[0, 1, 2]  # Z coord of right hip
-        is_right_handed = left_hip_z > right_hip_z
+        # Compute body axes from the first frame (use average of first few frames for stability)
+        n_avg = min(10, len(transformed))
 
-        # Rotate to body-relative frame
-        # Right-handed batter stands sideways with left shoulder toward pitcher
-        # Their body faces roughly toward +X (first base)
-        # Left-handed batter faces roughly toward -X (third base)
-        #
-        # To get consistent body-relative axes:
-        # Right-handed: rotate -90° around Y so body-forward becomes +Z
-        # Left-handed: rotate +90° around Y so body-forward becomes +Z
-        if is_right_handed:
-            # Rotate +90° around Y: (x,y,z) -> (-z, y, x)
-            # Right-handed batter faces pitcher, right hip is toward catcher
-            rotated = np.zeros_like(transformed)
-            rotated[:, :, 0] = -transformed[:, :, 2]  # new X = -old Z
-            rotated[:, :, 1] = transformed[:, :, 1]   # Y unchanged
-            rotated[:, :, 2] = transformed[:, :, 0]   # new Z = old X
-            transformed = rotated
-        else:
-            # Rotate -90° around Y: (x,y,z) -> (z, y, -x)
-            # Left-handed batter faces pitcher, left hip is toward catcher
-            rotated = np.zeros_like(transformed)
-            rotated[:, :, 0] = transformed[:, :, 2]   # new X = old Z
-            rotated[:, :, 1] = transformed[:, :, 1]   # Y unchanged
-            rotated[:, :, 2] = -transformed[:, :, 0]  # new Z = -old X
-            transformed = rotated
+        # Joint indices: pelvis=0, right_hip=1, left_hip=4, head=10
+        pelvis_avg = np.nanmean(transformed[:n_avg, 0, :], axis=0)
+        left_hip_avg = np.nanmean(transformed[:n_avg, 4, :], axis=0)
+        right_hip_avg = np.nanmean(transformed[:n_avg, 1, :], axis=0)
+        head_avg = np.nanmean(transformed[:n_avg, 10, :], axis=0)
 
-        # Flip Y-axis: Our triangulation produces Y-down, UPLIFT uses Y-up
-        # Head should be above pelvis (positive Y), ankles below (negative Y)
-        transformed[:, :, 1] = -transformed[:, :, 1]
+        # Compute current body axes
+        # Hip axis: left_hip - right_hip → should become +X in UPLIFT (LEFT = +X)
+        hip_axis = left_hip_avg - right_hip_avg
+        hip_axis = hip_axis / (np.linalg.norm(hip_axis) + 1e-8)
+
+        # Spine axis: head - pelvis → should become +Y in UPLIFT (UP = +Y)
+        spine_axis = head_avg - pelvis_avg
+        spine_axis = spine_axis / (np.linalg.norm(spine_axis) + 1e-8)
+
+        # Make spine_axis orthogonal to hip_axis (Gram-Schmidt)
+        spine_axis = spine_axis - np.dot(spine_axis, hip_axis) * hip_axis
+        spine_axis = spine_axis / (np.linalg.norm(spine_axis) + 1e-8)
+
+        # Forward axis: cross(hip_axis, spine_axis) → should become +Z in UPLIFT
+        forward_axis = np.cross(hip_axis, spine_axis)
+        forward_axis = forward_axis / (np.linalg.norm(forward_axis) + 1e-8)
+
+        # Current body coordinate frame (columns are axes)
+        # R_body maps from body-relative coords to world coords
+        R_body = np.column_stack([hip_axis, spine_axis, forward_axis])
+
+        # Target UPLIFT frame is identity (X=left, Y=up, Z=forward)
+        # We want R such that R @ body_coords = uplift_coords
+        # body_coords = R_body.T @ world_coords
+        # So R = R_body.T (inverse of R_body, which is transpose for orthonormal)
+        R = R_body.T
+
+        # Ensure it's a proper rotation (det = +1)
+        if np.linalg.det(R) < 0:
+            # Flip the forward axis if needed
+            R[2, :] = -R[2, :]
+
+        # Apply rotation to all frames
+        for i in range(len(transformed)):
+            for j in range(17):
+                transformed[i, j] = R @ transformed[i, j]
 
         # Center on pelvis (body-relative)
         if center_on_pelvis:
