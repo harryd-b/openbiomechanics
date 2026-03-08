@@ -43,7 +43,7 @@ class Keypoints:
 class PoseEstimator:
     """Extract 2D pose keypoints from video using YOLOv8."""
 
-    def __init__(self, model_name: str = 'yolov8n-pose.pt'):
+    def __init__(self, model_name: str = 'yolov8n-pose.pt', device: str = 'auto'):
         """
         Initialize the pose estimator.
 
@@ -54,8 +54,20 @@ class PoseEstimator:
                 - 'yolov8m-pose.pt'
                 - 'yolov8l-pose.pt'
                 - 'yolov8x-pose.pt' (slowest, most accurate)
+            device: 'auto', 'cuda', 'cpu', or device index (0, 1, etc.)
         """
+        import torch
         self.model = YOLO(model_name)
+
+        # Set device
+        if device == 'auto':
+            self.device = 0 if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
+
+        # Move model to device
+        if self.device != 'cpu':
+            self.model.to(self.device)
 
     def process_video(self, video_path: str,
                       max_frames: Optional[int] = None,
@@ -102,7 +114,7 @@ class PoseEstimator:
                        frame_number: int,
                        fps: float) -> Optional[PoseFrame]:
         """Process a single frame and extract pose."""
-        results = self.model.predict(frame, verbose=False)
+        results = self.model.predict(frame, verbose=False, device=self.device)
 
         if len(results) == 0 or results[0].keypoints is None:
             return None
@@ -127,14 +139,16 @@ class PoseEstimator:
             bbox=bbox
         )
 
-    def process_frame(self, frame: np.ndarray) -> Optional[np.ndarray]:
+    def process_frame(self, frame: np.ndarray,
+                      frame_number: int = 0,
+                      timestamp: float = 0.0) -> Optional[PoseFrame]:
         """
         Process a single frame (for real-time use).
 
         Returns:
-            Keypoints array of shape (17, 3) or None if no pose detected
+            PoseFrame object or None if no pose detected
         """
-        results = self.model.predict(frame, verbose=False)
+        results = self.model.predict(frame, verbose=False, device=self.device)
 
         if len(results) == 0 or results[0].keypoints is None:
             return None
@@ -144,7 +158,18 @@ class PoseEstimator:
         if len(keypoints) == 0:
             return None
 
-        return keypoints[0]
+        kp = keypoints[0]
+
+        bbox = None
+        if results[0].boxes is not None and len(results[0].boxes) > 0:
+            bbox = results[0].boxes.xyxy[0].cpu().numpy()
+
+        return PoseFrame(
+            frame_number=frame_number,
+            timestamp=timestamp,
+            keypoints=kp,
+            bbox=bbox
+        )
 
 
 def extract_joint_positions(pose: PoseFrame) -> dict:

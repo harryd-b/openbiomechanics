@@ -19,7 +19,7 @@ import uuid
 import numpy as np
 import pandas as pd
 
-from dash import Dash, html, dcc, callback, Output, Input, State, ctx
+from dash import Dash, html, dcc, callback, Output, Input, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
@@ -53,7 +53,7 @@ UPLOAD_DIR = tempfile.mkdtemp()
 
 def create_upload_card(camera_num: int):
     """Create an upload card for a camera with video preview."""
-    label = "PRIMARY" if camera_num == 1 else "SECONDARY"
+    label = "SIDE VIEW" if camera_num == 1 else "BACK VIEW"
     return html.Div([
         html.Div(label, className="section-title mb-2"),
         html.Div([
@@ -456,6 +456,34 @@ app.layout = dbc.Container([
                 })
             ], style={'paddingTop': '24px'}),
 
+            # Training Data Selector
+            html.Div([
+                html.Div("LOAD TRAINING DATA", className="section-title"),
+                html.Div([
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Dropdown(
+                                id='training-session-dropdown',
+                                placeholder="Select a training session...",
+                                style={'backgroundColor': '#1a1a2e', 'color': '#fff'}
+                            ),
+                        ], width=8),
+                        dbc.Col([
+                            dbc.Button("Load Session", id='load-session-btn', color="primary",
+                                       outline=True, className="w-100", disabled=True)
+                        ], width=4),
+                    ]),
+                    html.Div(id='load-session-status', className="mt-2",
+                             style={'color': '#666', 'fontSize': '0.85rem'})
+                ], className="glass-card", style={'padding': '16px'}),
+            ], className="mb-4"),
+
+            html.Div([
+                html.Hr(style={'borderColor': '#333', 'margin': '20px 0'}),
+                html.P("— OR upload new videos —", className="text-center",
+                       style={'color': '#555', 'fontSize': '0.85rem'})
+            ]),
+
             # Upload cards
             html.Div("VIDEO UPLOAD", className="section-title"),
             dbc.Row([
@@ -465,6 +493,39 @@ app.layout = dbc.Container([
                 dbc.Col([
                     create_upload_card(2)
                 ], width=6, className="mb-4"),
+            ]),
+
+            # UPLIFT Ground Truth upload (optional)
+            html.Div(id='uplift-section', style={'display': 'none'}, children=[
+                html.Div("GROUND TRUTH (OPTIONAL)", className="section-title mt-4"),
+                html.Div([
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Upload(
+                                id='upload-uplift-csv',
+                                children=html.Div([
+                                    html.I(className="fas fa-file-csv", style={'fontSize': '1.5rem', 'color': '#444', 'marginRight': '12px'}),
+                                    html.Span("Drop UPLIFT CSV here or ", style={'color': '#666'}),
+                                    html.Span("browse", style={'color': '#00d4aa', 'cursor': 'pointer'})
+                                ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'}),
+                                style={
+                                    'width': '100%',
+                                    'borderWidth': '1px',
+                                    'borderStyle': 'dashed',
+                                    'borderRadius': '8px',
+                                    'borderColor': '#333',
+                                    'padding': '15px',
+                                    'cursor': 'pointer',
+                                    'backgroundColor': 'rgba(30,30,48,0.5)',
+                                },
+                                accept='.csv'
+                            ),
+                        ], width=8),
+                        dbc.Col([
+                            html.Div(id='uplift-status', style={'color': '#666', 'fontSize': '0.85rem'})
+                        ], width=4, className="d-flex align-items-center"),
+                    ]),
+                ], className="glass-card", style={'padding': '16px'}),
             ]),
 
             # Settings section (hidden until video uploaded)
@@ -500,7 +561,7 @@ app.layout = dbc.Container([
                             html.Div("Angle between cameras (°)", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
                         ], width=3),
                         dbc.Col([
-                            html.Div("PRIMARY DISTANCE", className="metric-label mb-2"),
+                            html.Div("SIDE DISTANCE", className="metric-label mb-2"),
                             dbc.Input(
                                 id='camera-dist-1',
                                 type='number',
@@ -514,7 +575,7 @@ app.layout = dbc.Container([
                             html.Div("Distance in meters", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
                         ], width=3),
                         dbc.Col([
-                            html.Div("SECONDARY DISTANCE", className="metric-label mb-2"),
+                            html.Div("BACK DISTANCE", className="metric-label mb-2"),
                             dbc.Input(
                                 id='camera-dist-2',
                                 type='number',
@@ -527,6 +588,25 @@ app.layout = dbc.Container([
                             ),
                             html.Div("Distance in meters", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
                         ], width=3),
+                    ], className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div("POSE METHODS", className="metric-label mb-2"),
+                            dbc.Checklist(
+                                id='method-selector',
+                                options=[
+                                    {'label': ' YOLO + Lifting', 'value': 'yolo_lifting'},
+                                    {'label': ' MotionBERT', 'value': 'motionbert'},
+                                    {'label': ' Triangulation (2 cameras)', 'value': 'triangulation'}
+                                ],
+                                value=['yolo_lifting', 'motionbert', 'triangulation'],
+                                inline=True,
+                                className="text-light",
+                                style={'fontSize': '0.85rem'}
+                            ),
+                            html.Div("Select methods for pose estimation",
+                                    style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
+                        ], width=12)
                     ], className="mb-3"),
                     dbc.Row([
                         dbc.Col([
@@ -592,7 +672,7 @@ app.layout = dbc.Container([
                                     controls=True,
                                     style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
                                 ),
-                                html.Div("PRIMARY", className="video-label")
+                                html.Div("SIDE VIEW", className="video-label")
                             ], className="video-container", id='video-thumb-1'),
                         ], width=6),
                         dbc.Col([
@@ -602,7 +682,7 @@ app.layout = dbc.Container([
                                     controls=True,
                                     style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
                                 ),
-                                html.Div("SECONDARY", className="video-label")
+                                html.Div("BACK VIEW", className="video-label")
                             ], className="video-container", id='video-thumb-2'),
                         ], width=6),
                     ], className="mb-4"),
@@ -749,8 +829,12 @@ app.layout = dbc.Container([
                         dbc.Button("Export CSV", id='export-csv-btn', color="secondary",
                                    outline=True, className="w-100 mb-2", size="sm"),
                         dbc.Button("Export Report", id='export-report-btn', color="secondary",
+                                   outline=True, className="w-100 mb-2", size="sm"),
+                        dbc.Button("Save Training Data", id='save-training-btn', color="primary",
                                    outline=True, className="w-100", size="sm"),
                     ]),
+                    html.Div(id='save-training-status', className="mt-2 text-center",
+                             style={'fontSize': '0.8rem'}),
 
                 ], width=4),
             ]),
@@ -762,10 +846,27 @@ app.layout = dbc.Container([
             dbc.Row([
                 dbc.Col([
                     dbc.Button("← Back to Summary", id='back-to-summary-btn', color="link", className="ps-0")
-                ], width=6),
+                ], width=4),
+                dbc.Col([
+                    # Data source toggle
+                    html.Div([
+                        html.Span("DATA SOURCE:", className="metric-label me-2"),
+                        dbc.RadioItems(
+                            id='data-source-toggle',
+                            options=[
+                                {'label': ' Processed', 'value': 'processed'},
+                                {'label': ' UPLIFT', 'value': 'uplift', 'disabled': True}
+                            ],
+                            value='processed',
+                            inline=True,
+                            className="text-light",
+                            style={'display': 'inline-flex'}
+                        )
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'})
+                ], width=4, className="text-center"),
                 dbc.Col([
                     html.H5("Visualization", className="text-end mb-0")
-                ], width=6)
+                ], width=4)
             ], className="mb-3"),
 
             # Tabs for different views (UPLIFT-style)
@@ -775,6 +876,7 @@ app.layout = dbc.Container([
                 dbc.Tab(label="Pelvis", tab_id="tab-pelvis"),
                 dbc.Tab(label="Arms", tab_id="tab-arms"),
                 dbc.Tab(label="Legs", tab_id="tab-legs"),
+                dbc.Tab(label="Correlation", tab_id="tab-correlation"),
             ], id="analysis-tabs", active_tab="tab-analytics", className="mb-4"),
 
             # Tab content
@@ -822,7 +924,9 @@ app.layout = dbc.Container([
 
     # Store for session data
     dcc.Store(id='session-id'),
-    dcc.Store(id='uploaded-videos', data={'video1': None, 'video2': None}),
+    dcc.Store(id='uploaded-videos', data={'video1': None, 'video2': None, 'uplift_csv': None}),
+    dcc.Store(id='uplift-poses-data', data=None),  # Parsed UPLIFT 3D poses
+    dcc.Store(id='data-source', data='processed'),  # 'processed' or 'uplift'
     dcc.Store(id='results-data'),
     dcc.Store(id='current-page', data='summary'),  # 'summary' or 'visualization'
 
@@ -1302,6 +1406,160 @@ def update_summary_page(results_data, uploaded_videos):
     )
 
 
+# Training session callbacks
+@callback(
+    Output('training-session-dropdown', 'options'),
+    Input('upload-page', 'style'),  # Trigger on page load
+)
+def populate_training_sessions(_):
+    """Populate dropdown with available training sessions."""
+    training_dir = Path('training_data')
+    if not training_dir.exists():
+        return []
+
+    sessions = []
+    for session_dir in sorted(training_dir.glob('session_*')):
+        if session_dir.is_dir():
+            # Check what files exist
+            has_videos = (session_dir / 'side.mp4').exists() or (session_dir / 'back.mp4').exists()
+            has_uplift = (session_dir / 'uplift.csv').exists()
+            has_poses = (session_dir / 'poses_3d.npy').exists()
+
+            label = session_dir.name
+            if has_uplift:
+                label += " (UPLIFT)"
+            if has_poses:
+                label += " + processed"
+
+            sessions.append({'label': label, 'value': session_dir.name})
+
+    return sessions
+
+
+@callback(
+    Output('load-session-btn', 'disabled'),
+    Input('training-session-dropdown', 'value')
+)
+def enable_load_button(session):
+    return session is None
+
+
+@callback(
+    [Output('load-session-status', 'children'),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('uplift-poses-data', 'data', allow_duplicate=True),
+     Output('process-btn', 'disabled', allow_duplicate=True),
+     Output('upload-zone-1', 'style', allow_duplicate=True),
+     Output('video-preview-1', 'style', allow_duplicate=True),
+     Output('preview-player-1', 'src', allow_duplicate=True),
+     Output('settings-section', 'style', allow_duplicate=True),
+     Output('uplift-section', 'style', allow_duplicate=True),
+     Output('data-source-toggle', 'options', allow_duplicate=True)],
+    Input('load-session-btn', 'n_clicks'),
+    [State('training-session-dropdown', 'value'),
+     State('uploaded-videos', 'data')],
+    prevent_initial_call=True
+)
+def load_training_session(n_clicks, session_name, uploaded_videos):
+    """Load videos and UPLIFT data from a training session folder."""
+    if not n_clicks or not session_name:
+        raise PreventUpdate
+
+    session_dir = Path('training_data') / session_name
+
+    if not session_dir.exists():
+        return (f"Session folder not found: {session_name}", uploaded_videos, None, True,
+                no_update, no_update, no_update, no_update, no_update, no_update)
+
+    # Find video files
+    video_files = list(session_dir.glob('*.mp4')) + list(session_dir.glob('*.mov'))
+    if not video_files:
+        return (f"No video files found in {session_name}", uploaded_videos, None, True,
+                no_update, no_update, no_update, no_update, no_update, no_update)
+
+    # Load first video
+    video_path = str(video_files[0])
+    uploaded_videos['video1'] = video_path
+
+    # Load second video if present
+    if len(video_files) > 1:
+        uploaded_videos['video2'] = str(video_files[1])
+
+    # Find UPLIFT CSV
+    uplift_poses = None
+    uplift_files = list(session_dir.glob('*uplift*.csv')) + list(session_dir.glob('*ground_truth*.csv'))
+    if uplift_files:
+        try:
+            import pandas as pd
+            uplift_df = pd.read_csv(uplift_files[0])
+
+            # Convert UPLIFT to H36M format
+            UPLIFT_TO_H36M = {
+                0: 'pelvis', 1: 'right_hip', 2: 'right_knee', 3: 'right_ankle',
+                4: 'left_hip', 5: 'left_knee', 6: 'left_ankle', 7: 'spine_mid',
+                8: 'neck', 9: 'neck', 10: 'head', 11: 'left_shoulder',
+                12: 'left_elbow', 13: 'left_wrist', 14: 'right_shoulder',
+                15: 'right_elbow', 16: 'right_wrist'
+            }
+
+            poses = []
+            n_frames = len(uplift_df)
+
+            for f in range(n_frames):
+                pose = np.zeros((17, 3))
+                for h36m_idx, uplift_joint in UPLIFT_TO_H36M.items():
+                    for coord_idx, coord in enumerate(['x', 'y', 'z']):
+                        col = f'{uplift_joint}_{coord}'
+                        if col in uplift_df.columns:
+                            pose[h36m_idx, coord_idx] = uplift_df[col].iloc[f]
+                poses.append(pose.tolist())
+
+            uplift_poses = poses
+        except Exception as e:
+            print(f"Failed to load UPLIFT data: {e}")
+
+    # Generate video preview URL
+    try:
+        import base64
+        with open(video_path, 'rb') as f:
+            video_data = base64.b64encode(f.read()).decode('utf-8')
+            video_src = f"data:video/mp4;base64,{video_data}"
+    except Exception:
+        video_src = ""
+
+    # Update data source toggle options
+    if uplift_poses:
+        toggle_options = [
+            {'label': ' Processed', 'value': 'processed'},
+            {'label': ' UPLIFT', 'value': 'uplift'}
+        ]
+    else:
+        toggle_options = [
+            {'label': ' Processed', 'value': 'processed'},
+            {'label': ' UPLIFT', 'value': 'uplift', 'disabled': True}
+        ]
+
+    status = html.Div([
+        html.I(className="fas fa-check-circle", style={'color': '#4ade80', 'marginRight': '8px'}),
+        html.Span(f"Loaded {session_name} ({len(video_files)} video(s)" +
+                  (f", UPLIFT data" if uplift_poses else "") + ")",
+                  style={'color': '#4ade80'})
+    ])
+
+    return (
+        status,
+        uploaded_videos,
+        uplift_poses,
+        False,  # Enable process button
+        {'display': 'none'},  # Hide upload zone
+        {'display': 'block'},  # Show video preview
+        video_src,
+        {'display': 'block'},  # Show settings
+        {'display': 'block'},  # Show UPLIFT section
+        toggle_options
+    )
+
+
 # Callbacks
 @callback(
     [Output('upload-status-1', 'children'),
@@ -1310,7 +1568,8 @@ def update_summary_page(results_data, uploaded_videos):
      Output('upload-zone-1', 'style'),
      Output('video-preview-1', 'style'),
      Output('preview-player-1', 'src'),
-     Output('settings-section', 'style', allow_duplicate=True)],
+     Output('settings-section', 'style', allow_duplicate=True),
+     Output('uplift-section', 'style', allow_duplicate=True)],
     Input('upload-video-1', 'contents'),
     State('upload-video-1', 'filename'),
     State('uploaded-videos', 'data'),
@@ -1341,7 +1600,8 @@ def handle_upload_1(contents, filename, uploaded_videos):
         {'display': 'none'},  # Hide upload zone
         {'display': 'block'},  # Show video preview
         contents,  # Video source (data URL)
-        {'display': 'block'}  # Show settings
+        {'display': 'block'},  # Show settings
+        {'display': 'block'}  # Show UPLIFT section
     )
 
 
@@ -1352,7 +1612,8 @@ def handle_upload_1(contents, filename, uploaded_videos):
      Output('upload-zone-2', 'style'),
      Output('video-preview-2', 'style'),
      Output('preview-player-2', 'src'),
-     Output('settings-section', 'style', allow_duplicate=True)],
+     Output('settings-section', 'style', allow_duplicate=True),
+     Output('uplift-section', 'style', allow_duplicate=True)],
     Input('upload-video-2', 'contents'),
     State('upload-video-2', 'filename'),
     State('uploaded-videos', 'data'),
@@ -1381,8 +1642,103 @@ def handle_upload_2(contents, filename, uploaded_videos):
         {'display': 'none'},  # Hide upload zone
         {'display': 'block'},  # Show video preview
         contents,  # Video source (data URL)
-        {'display': 'block'}  # Show settings
+        {'display': 'block'},  # Show settings
+        {'display': 'block'}  # Show UPLIFT section
     )
+
+
+# Callback to handle UPLIFT CSV upload
+@callback(
+    [Output('uplift-status', 'children'),
+     Output('uploaded-videos', 'data', allow_duplicate=True),
+     Output('uplift-poses-data', 'data')],
+    Input('upload-uplift-csv', 'contents'),
+    State('upload-uplift-csv', 'filename'),
+    State('uploaded-videos', 'data'),
+    prevent_initial_call=True
+)
+def handle_uplift_upload(contents, filename, uploaded_videos):
+    if contents is None:
+        raise PreventUpdate
+
+    import io
+
+    # Decode the CSV content
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+
+    # Save the CSV file
+    csv_path = os.path.join(UPLOAD_DIR, f"uplift_{filename}")
+    df.to_csv(csv_path, index=False)
+    uploaded_videos['uplift_csv'] = csv_path
+
+    # Parse UPLIFT data to H36M format (17 joints, 3 coords)
+    H36M_JOINT_NAMES = [
+        'pelvis', 'right_hip', 'right_knee', 'right_ankle',
+        'left_hip', 'left_knee', 'left_ankle',
+        'spine', 'neck', 'head', 'head_top',
+        'left_shoulder', 'left_elbow', 'left_wrist',
+        'right_shoulder', 'right_elbow', 'right_wrist'
+    ]
+
+    # UPLIFT column mapping
+    joint_mapping = {
+        0: ('pelvis_3d_x', 'pelvis_3d_y', 'pelvis_3d_z'),
+        1: ('right_hip_jc_3d_x', 'right_hip_jc_3d_y', 'right_hip_jc_3d_z'),
+        2: ('right_knee_jc_3d_x', 'right_knee_jc_3d_y', 'right_knee_jc_3d_z'),
+        3: ('right_ankle_jc_3d_x', 'right_ankle_jc_3d_y', 'right_ankle_jc_3d_z'),
+        4: ('left_hip_jc_3d_x', 'left_hip_jc_3d_y', 'left_hip_jc_3d_z'),
+        5: ('left_knee_jc_3d_x', 'left_knee_jc_3d_y', 'left_knee_jc_3d_z'),
+        6: ('left_ankle_jc_3d_x', 'left_ankle_jc_3d_y', 'left_ankle_jc_3d_z'),
+        8: ('proximal_neck_3d_x', 'proximal_neck_3d_y', 'proximal_neck_3d_z'),
+        9: ('mid_head_3d_x', 'mid_head_3d_y', 'mid_head_3d_z'),
+        11: ('left_shoulder_jc_3d_x', 'left_shoulder_jc_3d_y', 'left_shoulder_jc_3d_z'),
+        12: ('left_elbow_jc_3d_x', 'left_elbow_jc_3d_y', 'left_elbow_jc_3d_z'),
+        13: ('left_wrist_jc_3d_x', 'left_wrist_jc_3d_y', 'left_wrist_jc_3d_z'),
+        14: ('right_shoulder_jc_3d_x', 'right_shoulder_jc_3d_y', 'right_shoulder_jc_3d_z'),
+        15: ('right_elbow_jc_3d_x', 'right_elbow_jc_3d_y', 'right_elbow_jc_3d_z'),
+        16: ('right_wrist_jc_3d_x', 'right_wrist_jc_3d_y', 'right_wrist_jc_3d_z'),
+    }
+
+    n_frames = len(df)
+    poses = np.zeros((n_frames, 17, 3))
+
+    for joint_idx, cols in joint_mapping.items():
+        if all(c in df.columns for c in cols):
+            poses[:, joint_idx, 0] = df[cols[0]].values
+            poses[:, joint_idx, 1] = df[cols[1]].values
+            poses[:, joint_idx, 2] = df[cols[2]].values
+
+    # Interpolate missing joints (spine=7, head_top=10)
+    poses[:, 7] = (poses[:, 0] + poses[:, 8]) / 2  # spine
+    poses[:, 10] = poses[:, 9] + (poses[:, 9] - poses[:, 8]) * 0.3  # head_top
+
+    status = html.Div([
+        html.I(className="fas fa-check-circle", style={'color': '#4ade80', 'marginRight': '8px'}),
+        html.Span(f"{filename} ({n_frames} frames)", style={'color': '#4ade80', 'fontSize': '0.85rem'})
+    ])
+
+    # Convert to list for JSON serialization
+    return status, uploaded_videos, poses.tolist()
+
+
+# Callback to enable UPLIFT toggle when data is available
+@callback(
+    Output('data-source-toggle', 'options'),
+    Input('uplift-poses-data', 'data'),
+    prevent_initial_call=True
+)
+def enable_uplift_toggle(uplift_poses):
+    if uplift_poses is not None and len(uplift_poses) > 0:
+        return [
+            {'label': ' Processed', 'value': 'processed'},
+            {'label': ' UPLIFT', 'value': 'uplift'}  # Enable UPLIFT option
+        ]
+    return [
+        {'label': ' Processed', 'value': 'processed'},
+        {'label': ' UPLIFT', 'value': 'uplift', 'disabled': True}
+    ]
 
 
 # Callback to remove video 1
@@ -1467,10 +1823,11 @@ def save_uploaded_file(contents: str, filename: str, camera_num: int) -> str:
     State('camera-angle', 'value'),
     State('camera-dist-1', 'value'),
     State('camera-dist-2', 'value'),
+    State('method-selector', 'value'),
     prevent_initial_call=True,
     background=False
 )
-def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, cam_dist_2):
+def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, cam_dist_2, selected_methods):
     if n_clicks is None:
         raise PreventUpdate
 
@@ -1487,9 +1844,22 @@ def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, ca
             {'display': 'none'}, 100, {}, {'display': 'none'}, {'display': 'block'}
         )
 
+    # Validate method selection
+    if not selected_methods:
+        selected_methods = ['yolo_lifting', 'motionbert']  # Default
+
+    # Triangulation requires 2 cameras
+    if 'triangulation' in selected_methods and len(video_paths) < 2:
+        selected_methods = [m for m in selected_methods if m != 'triangulation']
+        print("[WARNING] Triangulation requires 2 cameras, removing from methods")
+
     try:
         # Process videos with calibration data
-        pipeline = MultiViewPipeline(bats=bats)
+        import os
+        print(f"[DEBUG] CWD: {os.getcwd()}")
+        print(f"[DEBUG] Creating MultiViewPipeline with methods: {selected_methods}")
+        pipeline = MultiViewPipeline(bats=bats, methods=selected_methods)
+        print(f"[DEBUG] use_ensemble={pipeline.use_ensemble}")
 
         # Set camera parameters for 2-view setup with calibration
         if len(video_paths) == 2:
@@ -1578,11 +1948,13 @@ def process_videos(n_clicks, uploaded_videos, bats, camera_angle, cam_dist_1, ca
     Output('tab-content', 'children'),
     [Input('analysis-tabs', 'active_tab'),
      Input('frame-slider', 'value'),
-     Input('visualization-page', 'style')],  # Trigger on page show
+     Input('visualization-page', 'style'),
+     Input('data-source-toggle', 'value')],  # Data source selection
     [State('results-data', 'data'),
-     State('uploaded-videos', 'data')]
+     State('uploaded-videos', 'data'),
+     State('uplift-poses-data', 'data')]
 )
-def render_tab_content(active_tab, frame_idx, viz_style, results_data, uploaded_videos):
+def render_tab_content(active_tab, frame_idx, viz_style, data_source, results_data, uploaded_videos, uplift_poses):
     if results_data is None:
         raise PreventUpdate
 
@@ -1611,15 +1983,25 @@ def render_tab_content(active_tab, frame_idx, viz_style, results_data, uploaded_
         active_tab = "tab-analytics"
 
     # All tabs use the same layout: graphs on left, skeleton on right
-    return render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos)
+    return render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos,
+                                    data_source, uplift_poses)
 
 
-def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos=None):
+def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, uploaded_videos=None,
+                             data_source='processed', uplift_poses=None):
     """Render any tab with UPLIFT-style layout: graphs left, skeleton center, video top-right."""
     import json
 
     df = results['timeseries_df']
-    poses_3d = results.get('poses_3d', [])
+
+    # Choose pose data source
+    using_uplift = data_source == 'uplift' and uplift_poses is not None
+    if using_uplift:
+        poses_3d = [np.array(p) for p in uplift_poses]
+        print(f"[VIEWER] Using UPLIFT poses ({len(poses_3d)} frames)")
+    else:
+        poses_3d = results.get('poses_3d', [])
+        print(f"[VIEWER] Using processed poses ({len(poses_3d)} frames)")
 
     # Prepare poses for Three.js viewer (fix coordinates)
     fixed_poses = []
@@ -1650,17 +2032,27 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
         if np.all(np.abs(pose[10]) < max_reasonable):
             last_good_head = pose[10].copy()
 
-        # Fix coordinate system and center
-        # NEGATE X to flip horizontally (corrects right/left handedness)
+        # Fix coordinate system for Three.js viewer (Y-up)
         fixed = np.zeros_like(pose)
-        fixed[:, 0] = -pose[:, 0]  # Flip X axis for correct handedness
-        fixed[:, 1] = pose[:, 2]
-        fixed[:, 2] = -pose[:, 1]
-        fixed[:, 2] = fixed[:, 2] - fixed[:, 2].min() + 0.02
+        if using_uplift:
+            # UPLIFT data is already Y-up, just use as-is with minor adjustments
+            fixed[:, 0] = pose[:, 0]   # X as-is
+            fixed[:, 1] = pose[:, 1]   # Y is vertical (up)
+            fixed[:, 2] = -pose[:, 2]  # Flip Z so skeleton faces camera
+        else:
+            # Processed data needs coordinate transformation
+            fixed[:, 0] = -pose[:, 0]  # Flip X for mirror effect
+            fixed[:, 1] = pose[:, 1]   # Y as vertical
+            fixed[:, 2] = -pose[:, 2]  # Flip Z for camera direction
+
+        # Floor the skeleton (shift Y so minimum is at ground level)
+        fixed[:, 1] = fixed[:, 1] - fixed[:, 1].min() + 0.02
         fixed_poses.append(fixed.tolist())
 
     # Get graphs for the active tab
-    graphs_content = get_tab_graphs(active_tab, df, results, frame_idx, events_dict)
+    processed_poses_for_correlation = results.get('poses_3d', [])
+    graphs_content = get_tab_graphs(active_tab, df, results, frame_idx, events_dict,
+                                     processed_poses_for_correlation, uplift_poses)
 
     # Convert poses to JSON for iframe
     poses_json = json.dumps(fixed_poses)
@@ -1736,7 +2128,138 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
     ])
 
 
-def get_tab_graphs(active_tab, df, results, frame_idx, events_dict):
+def create_correlation_tab(processed_poses, uplift_poses):
+    """Create correlation visualization comparing processed poses to UPLIFT ground truth."""
+
+    if not processed_poses or not uplift_poses:
+        return html.Div([
+            html.P("Correlation analysis requires both processed and UPLIFT data.",
+                   style={'color': '#888', 'padding': '20px'}),
+            html.P("Upload UPLIFT CSV data and process videos to compare.",
+                   style={'color': '#666', 'fontSize': '12px', 'paddingLeft': '20px'})
+        ])
+
+    # Convert to numpy arrays
+    proc = np.array(processed_poses)
+    uplift = np.array(uplift_poses)
+
+    # Align frame counts
+    n_frames = min(len(proc), len(uplift))
+    proc = proc[:n_frames]
+    uplift = uplift[:n_frames]
+
+    if n_frames == 0:
+        return html.Div("No overlapping frames between datasets", style={'color': '#888'})
+
+    # H36M joint names
+    joint_names = [
+        'Hip', 'RHip', 'RKnee', 'RAnkle', 'LHip', 'LKnee', 'LAnkle',
+        'Spine', 'Thorax', 'Neck', 'Head', 'LShoulder', 'LElbow', 'LWrist',
+        'RShoulder', 'RElbow', 'RWrist'
+    ]
+
+    # Calculate per-joint MPJPE (in centimeters)
+    per_joint_error = np.zeros(proc.shape[1])  # 17 joints
+    for j in range(proc.shape[1]):
+        errors = np.linalg.norm(proc[:, j, :] - uplift[:, j, :], axis=1)
+        per_joint_error[j] = np.mean(errors) * 100  # Convert to cm
+
+    overall_mpjpe = np.mean(per_joint_error)
+
+    # Create bar chart of per-joint MPJPE
+    fig_mpjpe = go.Figure()
+
+    colors = ['#ff6b6b' if e > 10 else '#ffd93d' if e > 5 else '#6bcb77' for e in per_joint_error]
+
+    fig_mpjpe.add_trace(go.Bar(
+        x=joint_names,
+        y=per_joint_error,
+        marker_color=colors,
+        text=[f'{e:.1f}' for e in per_joint_error],
+        textposition='outside',
+        textfont=dict(size=9, color='#ccc')
+    ))
+
+    fig_mpjpe.update_layout(
+        title=dict(
+            text=f'Per-Joint MPJPE (Overall: {overall_mpjpe:.1f} cm)',
+            font=dict(size=14, color='#fff'),
+            x=0.5
+        ),
+        template='plotly_dark',
+        paper_bgcolor='rgba(26,26,46,0)',
+        plot_bgcolor='rgba(26,26,46,0.5)',
+        height=250,
+        margin=dict(l=50, r=20, t=40, b=60),
+        xaxis=dict(
+            tickangle=45,
+            tickfont=dict(size=9, color='#888'),
+            gridcolor='rgba(80,80,80,0.3)'
+        ),
+        yaxis=dict(
+            title='Error (cm)',
+            tickfont=dict(size=9, color='#888'),
+            gridcolor='rgba(80,80,80,0.3)'
+        )
+    )
+
+    # Create temporal error plot
+    frame_errors = []
+    for f in range(n_frames):
+        err = np.mean(np.linalg.norm(proc[f] - uplift[f], axis=1)) * 100
+        frame_errors.append(err)
+
+    fig_temporal = go.Figure()
+    fig_temporal.add_trace(go.Scatter(
+        x=list(range(n_frames)),
+        y=frame_errors,
+        mode='lines',
+        line=dict(color='#00ff00', width=1.5),
+        fill='tozeroy',
+        fillcolor='rgba(0,255,0,0.1)'
+    ))
+
+    fig_temporal.update_layout(
+        title=dict(
+            text='MPJPE Over Time',
+            font=dict(size=14, color='#fff'),
+            x=0.5
+        ),
+        template='plotly_dark',
+        paper_bgcolor='rgba(26,26,46,0)',
+        plot_bgcolor='rgba(26,26,46,0.5)',
+        height=180,
+        margin=dict(l=50, r=20, t=40, b=30),
+        xaxis=dict(
+            title='Frame',
+            tickfont=dict(size=9, color='#888'),
+            gridcolor='rgba(80,80,80,0.3)'
+        ),
+        yaxis=dict(
+            title='Error (cm)',
+            tickfont=dict(size=9, color='#888'),
+            gridcolor='rgba(80,80,80,0.3)'
+        )
+    )
+
+    # Statistics summary
+    stats_text = f"""
+    **Correlation Statistics**
+    - Frames analyzed: {n_frames}
+    - Overall MPJPE: {overall_mpjpe:.2f} cm
+    - Best joint: {joint_names[np.argmin(per_joint_error)]} ({per_joint_error.min():.1f} cm)
+    - Worst joint: {joint_names[np.argmax(per_joint_error)]} ({per_joint_error.max():.1f} cm)
+    - Median error: {np.median(per_joint_error):.1f} cm
+    """
+
+    return html.Div([
+        dcc.Markdown(stats_text, style={'color': '#ccc', 'fontSize': '12px', 'padding': '10px'}),
+        dcc.Graph(figure=fig_mpjpe, config={'displayModeBar': False}),
+        dcc.Graph(figure=fig_temporal, config={'displayModeBar': False})
+    ])
+
+
+def get_tab_graphs(active_tab, df, results, frame_idx, events_dict, processed_poses=None, uplift_poses=None):
     """Get the graph content for a specific tab with UPLIFT-style accordions."""
 
     if active_tab == "tab-analytics":
@@ -1823,6 +2346,9 @@ def get_tab_graphs(active_tab, df, results, frame_idx, events_dict):
                 ]
             }
         ])
+
+    elif active_tab == "tab-correlation":
+        return create_correlation_tab(processed_poses, uplift_poses)
 
     return html.Div("Select a tab")
 
@@ -2210,6 +2736,84 @@ def export_data(csv_clicks, report_clicks, results_data):
         return dcc.send_data_frame(metrics_df.to_csv, "poi_metrics.csv", index=False)
 
     raise PreventUpdate
+
+
+# Callback to save training data
+@callback(
+    Output('save-training-status', 'children'),
+    Input('save-training-btn', 'n_clicks'),
+    [State('results-data', 'data'),
+     State('uploaded-videos', 'data'),
+     State('uplift-poses-data', 'data')],
+    prevent_initial_call=True
+)
+def save_training_data(n_clicks, results_data, uploaded_videos, uplift_poses):
+    if n_clicks is None or results_data is None:
+        raise PreventUpdate
+
+    import shutil
+    from datetime import datetime
+
+    session_id = results_data['session_id']
+    if session_id not in RESULTS_CACHE:
+        return html.Span("Error: No results to save", style={'color': '#f87171'})
+
+    results = RESULTS_CACHE[session_id]
+
+    # Create new session folder
+    training_dir = Path('training_data')
+    existing = list(training_dir.glob('session_*'))
+    next_num = len(existing) + 1
+    session_dir = training_dir / f'session_{next_num:03d}'
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Copy video files
+        if uploaded_videos.get('video1'):
+            shutil.copy(uploaded_videos['video1'], session_dir / 'side.mp4')
+        if uploaded_videos.get('video2'):
+            shutil.copy(uploaded_videos['video2'], session_dir / 'back.mp4')
+
+        # Copy UPLIFT CSV if available
+        if uploaded_videos.get('uplift_csv'):
+            shutil.copy(uploaded_videos['uplift_csv'], session_dir / 'uplift.csv')
+        elif uplift_poses is not None:
+            # Save UPLIFT poses as CSV if we have them
+            uplift_df = pd.DataFrame()
+            joint_names = ['pelvis', 'right_hip', 'right_knee', 'right_ankle',
+                          'left_hip', 'left_knee', 'left_ankle', 'spine', 'neck',
+                          'head', 'head_top', 'left_shoulder', 'left_elbow', 'left_wrist',
+                          'right_shoulder', 'right_elbow', 'right_wrist']
+            for j, name in enumerate(joint_names):
+                for c, coord in enumerate(['x', 'y', 'z']):
+                    col_name = f'{name}_3d_{coord}'
+                    uplift_df[col_name] = [frame[j][c] for frame in uplift_poses]
+            uplift_df.to_csv(session_dir / 'uplift.csv', index=False)
+
+        # Save processed poses
+        poses_3d = results.get('poses_3d', [])
+        if poses_3d:
+            np.save(session_dir / 'poses_3d.npy', np.array(poses_3d))
+
+        # Save timeseries
+        results['timeseries_df'].to_csv(session_dir / 'timeseries.csv', index=False)
+
+        # Save metadata
+        metadata = {
+            'fps': results['fps'],
+            'n_frames': results_data['n_frames'],
+            'n_cameras': results['n_cameras'],
+            'created': datetime.now().isoformat(),
+            'has_uplift': uploaded_videos.get('uplift_csv') is not None or uplift_poses is not None
+        }
+        import json
+        with open(session_dir / 'metadata.json', 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        return html.Span(f"Saved to {session_dir.name}", style={'color': '#4ade80'})
+
+    except Exception as e:
+        return html.Span(f"Error: {str(e)}", style={'color': '#f87171'})
 
 
 def run_app(debug: bool = False, port: int = 8050):

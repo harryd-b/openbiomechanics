@@ -2,3 +2,16 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Video biomechanics
+video_biomechanics/training_data/
+video_biomechanics/tmp/
+video_biomechanics/models/
+yolov8m-pose.pt
+*.pt
+__pycache__/
+*.pyc
+.claude/
+# Exclude large training artifacts
+video_biomechanics/ml/plate_detector/synthetic_images/
+video_biomechanics/ml/plate_detector/checkpoints/

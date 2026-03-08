@@ -324,13 +324,21 @@ class MultiViewPipeline:
 
     def __init__(self,
                  pose_model: str = 'yolov8m-pose.pt',
-                 bats: str = 'R'):
+                 bats: str = 'R',
+                 use_ensemble: bool = True,
+                 fusion_model_path: str = 'models/fusion_model.pt',
+                 angle_model_path: str = 'models/angle_predictor.pt',
+                 methods: List[str] = None):
         """
         Initialize multi-view pipeline.
 
         Args:
             pose_model: YOLOv8 pose model
             bats: Batting side
+            use_ensemble: Use trained ensemble pose fusion and angle prediction
+            fusion_model_path: Path to trained fusion model
+            angle_model_path: Path to trained angle predictor
+            methods: List of pose estimation methods to use
         """
         self.pose_estimator = PoseEstimator(model_name=pose_model)
         self.bats = bats
@@ -338,6 +346,149 @@ class MultiViewPipeline:
         self.cameras: List[CameraParams] = []
         self.fps = None
         self.calibrated = False  # Set to True when using calibrated camera distances
+        self.methods = methods or ['yolo_lifting', 'motionbert', 'triangulation']
+
+        # Ensemble pipeline and angle predictor
+        self.use_ensemble = use_ensemble
+        self.ensemble_pipeline = None
+        self.angle_predictor = None
+
+        if use_ensemble:
+            self._init_ensemble(fusion_model_path, angle_model_path)
+
+    def _init_ensemble(self, fusion_model_path: str, angle_model_path: str):
+        """Initialize ensemble pipeline and angle predictor if models exist."""
+        from pathlib import Path
+        import os
+
+        # Use absolute path relative to this file's directory
+        base_dir = Path(__file__).parent
+        fusion_path = base_dir / fusion_model_path
+        angle_path = base_dir / angle_model_path
+
+        print(f"[DEBUG] CWD: {os.getcwd()}")
+        print(f"[DEBUG] Base dir: {base_dir}")
+        print(f"[DEBUG] Fusion path: {fusion_path} (exists: {fusion_path.exists()})")
+        print(f"[DEBUG] Angle path: {angle_path} (exists: {angle_path.exists()})")
+
+        if fusion_path.exists() and angle_path.exists():
+            try:
+                from ensemble_pipeline import EnsemblePosePipeline
+                from fusion.learned_angles import AnglePredictor
+
+                print(f"Loading trained ensemble models with methods: {self.methods}")
+                self.ensemble_pipeline = EnsemblePosePipeline(
+                    methods=self.methods,
+                    fusion_model_path=str(fusion_path)
+                )
+
+                self.angle_predictor = AnglePredictor()
+                self.angle_predictor.load(str(angle_path))
+                print("  Ensemble pipeline ready (3 methods including triangulation)")
+                print("  Angle predictor ready")
+
+            except Exception as e:
+                print(f"Failed to load ensemble models: {e}")
+                print("  Falling back to standard processing")
+                self.use_ensemble = False
+        else:
+            if not fusion_path.exists():
+                print(f"Fusion model not found: {fusion_path}")
+            if not angle_path.exists():
+                print(f"Angle model not found: {angle_path}")
+            print("  Using standard processing")
+            self.use_ensemble = False
+
+    def _process_with_ensemble(self, video_paths: List[str], max_frames: Optional[int] = None) -> Dict:
+        """Process videos using trained ensemble pipeline and angle predictor."""
+        import pandas as pd
+        import numpy as np
+        from dataclasses import dataclass
+
+        print("\n[ENSEMBLE MODE] Using trained pose fusion and angle prediction")
+
+        # Set up camera parameters for triangulation if we have 2 videos
+        if len(video_paths) >= 2 and 'triangulation' in self.ensemble_pipeline.estimators:
+            camera_distances = [
+                getattr(self, 'camera_distances', [3.0, 3.0])[0] if hasattr(self, 'camera_distances') else 3.0,
+                getattr(self, 'camera_distances', [3.0, 3.0])[1] if hasattr(self, 'camera_distances') and len(self.camera_distances) > 1 else 3.0
+            ]
+            camera_angles = [0, 90]  # Default: side and back views
+            self.ensemble_pipeline.estimators['triangulation'].set_camera_params(
+                video_paths, camera_distances, camera_angles
+            )
+            print(f"  Set up triangulation: distances={camera_distances}m, angles={camera_angles}°")
+
+        # Process with ensemble pipeline
+        results = self.ensemble_pipeline.process_videos(video_paths, max_frames=max_frames)
+        poses_3d = results.poses_3d
+        self.fps = results.fps
+
+        print(f"  Fused {len(poses_3d)} 3D poses")
+
+        # Predict angles using trained model
+        print("  Predicting joint angles with trained model...")
+        poses_array = np.array(poses_3d)
+        predicted_angles_df = self.angle_predictor.predict_dataframe(poses_array)
+
+        # Also calculate angles with rule-based method for comparison/fallback
+        from joint_angles_3d import JointAngleCalculator3D
+        angle_calc = JointAngleCalculator3D()
+
+        joint_angles = []
+        for i, pose in enumerate(poses_3d):
+            timestamp = results.timestamps[i] if i < len(results.timestamps) else i / self.fps
+            angles = angle_calc.calculate(pose, timestamp=timestamp, frame_number=i)
+
+            # Override with learned predictions for columns we trained on
+            for col in self.angle_predictor.angle_names:
+                if hasattr(angles, col):
+                    setattr(angles, col, predicted_angles_df.iloc[i][col])
+
+            joint_angles.append(angles)
+
+        # Detect events
+        print("  Detecting events...")
+        from event_detection import SwingEventDetector
+        detector = SwingEventDetector(fps=self.fps, bats=self.bats)
+        events = detector.detect_events(poses_array)
+
+        # Calculate metrics
+        print("  Calculating metrics...")
+        metrics = self._calculate_metrics(joint_angles, events)
+
+        # Build timeseries dataframe with learned angle predictions
+        timeseries_df = self._build_timeseries_df(joint_angles, poses_3d)
+
+        # Add learned angles to timeseries
+        for col in self.angle_predictor.angle_names:
+            if col not in timeseries_df.columns:
+                timeseries_df[col] = predicted_angles_df[col].values[:len(timeseries_df)]
+
+        # Create multiview frames for compatibility
+        multiview_frames = [
+            MultiViewFrame(
+                frame_number=i,
+                timestamp=results.timestamps[i] if i < len(results.timestamps) else i / self.fps,
+                poses_2d=[],
+                pose_3d=pose
+            )
+            for i, pose in enumerate(poses_3d)
+        ]
+
+        return {
+            'poses_2d': [],
+            'multiview_frames': multiview_frames,
+            'poses_3d': poses_3d,
+            'joint_angles': joint_angles,
+            'events': events,
+            'metrics': metrics,
+            'timeseries_df': timeseries_df,
+            'fps': self.fps,
+            'n_cameras': len(video_paths),
+            'sync_offsets': [0] * len(video_paths),
+            'method': 'ensemble'
+        }
 
     def add_camera(self, params: CameraParams):
         """Add camera parameters."""
@@ -436,6 +587,10 @@ class MultiViewPipeline:
         cap = cv2.VideoCapture(video_paths[0])
         self.fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
+
+        # Use ensemble pipeline if available
+        if self.use_ensemble and self.ensemble_pipeline is not None:
+            return self._process_with_ensemble(video_paths, max_frames)
 
         # Estimate camera parameters if not provided
         if len(self.cameras) < len(video_paths):
@@ -668,6 +823,19 @@ class MultiViewPipeline:
 
         df = pd.DataFrame(records)
 
+        # Unwrap rotation angles to remove ±180° discontinuities
+        rotation_cols = [
+            'pelvis_rotation', 'pelvis_global_rotation',
+            'torso_rotation', 'trunk_global_rotation',
+            'hip_shoulder_separation', 'trunk_twist_clockwise',
+            'head_twist_clockwise'
+        ]
+        for col in rotation_cols:
+            if col in df.columns and not df[col].isna().all():
+                radians = np.deg2rad(df[col].values)
+                unwrapped = np.unwrap(radians)
+                df[col] = np.rad2deg(unwrapped)
+
         if len(df) > 1 and self.fps:
             dt = 1.0 / self.fps
             # Compute velocities for angle columns only (not positions)
@@ -677,7 +845,7 @@ class MultiViewPipeline:
                 if not df[col].isna().all():
                     try:
                         df[f'{col}_velocity'] = np.gradient(
-                            df[col].fillna(method='ffill').fillna(method='bfill'), dt
+                            df[col].ffill().bfill(), dt
                         )
                     except:
                         pass

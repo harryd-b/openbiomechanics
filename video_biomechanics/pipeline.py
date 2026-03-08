@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional, List
 from pathlib import Path
+from scipy.signal import savgol_filter
 
 from pose_estimation import PoseEstimator, extract_joint_positions, PoseFrame
 from joint_angles import JointAngleCalculator, JointAngles
@@ -119,10 +120,11 @@ class VideoBiomechanicsPipeline:
         print("\nStep 3/5: Calculating joint angles...")
         if self.use_3d and results['poses_3d']:
             joint_angles = []
-            for pose_3d in results['poses_3d']:
+            for i, pose_3d in enumerate(results['poses_3d']):
                 angles = self.angle_calculator.calculate(
                     pose_3d.joints_3d,
-                    timestamp=pose_3d.timestamp
+                    timestamp=pose_3d.timestamp,
+                    frame_number=i
                 )
                 joint_angles.append(angles)
         else:
@@ -295,17 +297,46 @@ class VideoBiomechanicsPipeline:
 
         df = pd.DataFrame(records)
 
-        # Add angular velocities
+        # Unwrap rotation angles to remove ±180° discontinuities
+        # These columns use arctan2 and can wrap around
+        rotation_cols = [
+            'pelvis_rotation', 'pelvis_global_rotation',
+            'torso_rotation', 'trunk_global_rotation',
+            'hip_shoulder_separation', 'trunk_twist_clockwise',
+            'head_twist_clockwise'
+        ]
+        for col in rotation_cols:
+            if col in df.columns and not df[col].isna().all():
+                # Convert to radians, unwrap, convert back to degrees
+                radians = np.deg2rad(df[col].values)
+                unwrapped = np.unwrap(radians)
+                df[col] = np.rad2deg(unwrapped)
+
+        # Add angular velocities using Savitzky-Golay filter for smooth derivatives
+        # This matches UPLIFT's velocity calculation more closely
         if len(df) > 1 and self.fps:
             dt = 1.0 / self.fps
+            # Use window size that's odd and less than data length
+            window_length = min(7, len(df) if len(df) % 2 == 1 else len(df) - 1)
+            if window_length < 3:
+                window_length = 3
+
             for col in df.columns:
                 if col != 'timestamp' and not df[col].isna().all():
                     try:
-                        df[f'{col}_velocity'] = np.gradient(
-                            df[col].fillna(method='ffill').fillna(method='bfill'),
-                            dt
-                        )
-                    except:
+                        # Fill NaN values with interpolation
+                        values = df[col].interpolate(method='linear').ffill().bfill()
+
+                        if len(values) >= window_length:
+                            # Use Savitzky-Golay filter for smooth derivative
+                            # deriv=1 calculates first derivative, delta=dt gives units of per-second
+                            df[f'{col}_velocity'] = savgol_filter(
+                                values, window_length, polyorder=2, deriv=1, delta=dt
+                            )
+                        else:
+                            # Fallback to numpy gradient for very short sequences
+                            df[f'{col}_velocity'] = np.gradient(values, dt)
+                    except Exception:
                         pass
 
         return df

@@ -87,6 +87,14 @@ class JointAngles3D:
     whole_body_center_of_mass_y: Optional[float] = None
     whole_body_center_of_mass_z: Optional[float] = None
 
+    # 3D positions (UPLIFT format)
+    pelvis_3d_x: Optional[float] = None
+    pelvis_3d_y: Optional[float] = None
+    pelvis_3d_z: Optional[float] = None
+
+    # Frame info
+    frame: Optional[int] = None
+
     # Legacy names (for backwards compatibility with dashboard)
     hip_shoulder_separation: Optional[float] = None
     pelvis_rotation: Optional[float] = None
@@ -235,6 +243,7 @@ class JointAngleCalculator3D:
     def calculate(self,
                   joints_3d: np.ndarray,
                   timestamp: float = 0.0,
+                  frame_number: int = None,
                   global_forward: np.ndarray = None) -> JointAngles3D:
         """
         Calculate all joint angles from 3D positions.
@@ -242,6 +251,7 @@ class JointAngleCalculator3D:
         Args:
             joints_3d: Array of shape (17, 3) with 3D joint positions
             timestamp: Time of this frame
+            frame_number: Frame index (optional)
             global_forward: Direction toward target (default: +X)
 
         Returns:
@@ -251,6 +261,7 @@ class JointAngleCalculator3D:
             global_forward = np.array([1, 0, 0])  # Toward pitcher
 
         angles = JointAngles3D(timestamp=timestamp)
+        angles.frame = frame_number
         j = self.joints
 
         # Get joint positions
@@ -284,9 +295,10 @@ class JointAngleCalculator3D:
 
         # Pelvis rotation: angle of pelvis_forward from global_forward, about Z axis
         # Use atan2 for proper quadrant handling
+        # UPLIFT convention: negate to match their rotation direction
         pelvis_angle = np.arctan2(pelvis_forward[1], pelvis_forward[0])
         global_angle = np.arctan2(global_forward[1], global_forward[0])
-        angles.pelvis_rotation = np.degrees(pelvis_angle - global_angle)
+        angles.pelvis_rotation = -np.degrees(pelvis_angle - global_angle)
         # Normalize to [-180, 180]
         while angles.pelvis_rotation > 180:
             angles.pelvis_rotation -= 360
@@ -294,12 +306,25 @@ class JointAngleCalculator3D:
             angles.pelvis_rotation += 360
 
         # Pelvis obliquity (lateral tilt)
+        # UPLIFT convention: positive = right hip higher
         hip_axis = right_hip - left_hip
         hip_axis_len = np.linalg.norm(hip_axis)
         if hip_axis_len > 1e-6:
             angles.pelvis_obliquity = np.degrees(np.arcsin(np.clip(hip_axis[2] / hip_axis_len, -1, 1)))
         else:
             angles.pelvis_obliquity = 0.0
+
+        # Pelvis anterior tilt (forward/backward tilt)
+        # This requires spine position to calculate properly
+        spine = get('spine')
+        pelvis_to_spine = spine - hip_center
+        if np.linalg.norm(pelvis_to_spine) > 1e-6:
+            # Anterior tilt = how much pelvis is tilted forward
+            # Positive = anterior tilt (belly forward)
+            pelvis_tilt_angle = np.degrees(np.arctan2(pelvis_to_spine[0], pelvis_to_spine[2]))
+            angles.pelvis_tilt = pelvis_tilt_angle
+        else:
+            angles.pelvis_tilt = 0.0
 
         # ===== TORSO =====
         left_shoulder = get('left_shoulder')
@@ -324,8 +349,9 @@ class JointAngleCalculator3D:
             torso_forward = np.array([1, 0, 0])
 
         # Torso rotation
+        # UPLIFT convention: negate to match their rotation direction
         torso_angle = np.arctan2(torso_forward[1], torso_forward[0])
-        angles.torso_rotation = np.degrees(torso_angle - global_angle)
+        angles.torso_rotation = -np.degrees(torso_angle - global_angle)
         while angles.torso_rotation > 180:
             angles.torso_rotation -= 360
         while angles.torso_rotation < -180:
@@ -337,8 +363,11 @@ class JointAngleCalculator3D:
         torso_up = torso_vec / torso_vec_norm if torso_vec_norm > 1e-6 else np.array([0, 0, 1])
         if torso_vec_norm > 1e-6:
             # Angle from vertical (Z axis)
+            # UPLIFT convention: positive = forward lean, measured from vertical
             cos_angle = np.clip(torso_vec[2] / torso_vec_norm, -1, 1)
-            angles.torso_flexion = 90 - np.degrees(np.arccos(cos_angle))
+            angle_from_vertical = np.degrees(np.arccos(cos_angle))
+            # Forward tilt is when X component is positive (toward target)
+            angles.torso_flexion = angle_from_vertical if torso_vec[0] > 0 else -angle_from_vertical
         else:
             angles.torso_flexion = 0.0
 
@@ -352,8 +381,10 @@ class JointAngleCalculator3D:
 
         # ===== HIP-SHOULDER SEPARATION (X-Factor) =====
         # Direct calculation: angle between shoulder line and hip line in horizontal plane
+        # UPLIFT convention: positive = torso rotated toward target relative to pelvis
         pelvis_angle_deg = np.degrees(np.arctan2(pelvis_right[1], pelvis_right[0]))
         torso_angle_deg = np.degrees(np.arctan2(torso_right[1], torso_right[0]))
+        # Match UPLIFT's trunk_twist_clockwise convention
         angles.hip_shoulder_separation = torso_angle_deg - pelvis_angle_deg
         # Normalize to [-180, 180]
         while angles.hip_shoulder_separation > 180:
@@ -391,11 +422,13 @@ class JointAngleCalculator3D:
             ankle = get(f'{side}_ankle')
 
             # Knee flexion and extension
+            # UPLIFT convention: 0° = straight leg, negative = flexed
             thigh = hip - knee
             shank = ankle - knee
             flexion = 180 - angle_between_vectors(thigh, shank)
             setattr(angles, f'{side}_knee_flexion', flexion)
-            setattr(angles, f'{side}_knee_extension', 180 - flexion)
+            # UPLIFT uses negative for flexion, 0 for straight
+            setattr(angles, f'{side}_knee_extension', -flexion)
 
         # ===== SHOULDERS =====
         for side in ['left', 'right']:
@@ -480,13 +513,20 @@ class JointAngleCalculator3D:
             thigh = knee - hip
 
             # Hip flexion w.r.t. trunk
+            # UPLIFT convention: angle of thigh relative to trunk axis
+            # Positive = hip flexed (thigh forward)
             flexion = angle_between_vectors(thigh, -torso_up)
-            setattr(angles, f'{side}_hip_flexion_with_respect_to_trunk', 180 - flexion)
+            setattr(angles, f'{side}_hip_flexion_with_respect_to_trunk', flexion)
 
             # Hip adduction w.r.t. trunk (negative of abduction)
-            thigh_frontal = thigh.copy()
-            thigh_frontal[0] = 0
-            adduction = -signed_angle_about_axis(-vertical, thigh_frontal, np.array([1, 0, 0]))
+            # UPLIFT convention: positive = leg toward midline
+            # Use signed angle in frontal plane
+            thigh_norm = normalize_vector(thigh)
+            # Project thigh onto plane perpendicular to forward direction
+            thigh_frontal = thigh_norm - np.dot(thigh_norm, torso_forward) * torso_forward
+            # Adduction is rotation toward midline (negative for left, positive for right when viewed from front)
+            sign = 1 if side == 'right' else -1
+            adduction = sign * np.degrees(np.arctan2(thigh_frontal[1], -thigh_frontal[2]))
             setattr(angles, f'{side}_hip_adduction_with_respect_to_trunk', adduction)
 
             # Hip internal rotation
@@ -494,16 +534,24 @@ class JointAngleCalculator3D:
             setattr(angles, f'{side}_hip_internal_rotation_with_respect_to_trunk', 0.0)  # Placeholder
 
         # ===== HIP ANGLES W.R.T. PELVIS =====
+        pelvis_up = np.cross(pelvis_forward, pelvis_right)
+        pelvis_up = normalize_vector(pelvis_up)
         for side in ['left', 'right']:
             hip = get(f'{side}_hip')
             knee = get(f'{side}_knee')
             thigh = knee - hip
-            thigh_frontal = thigh.copy()
-            thigh_frontal[0] = 0
+            thigh_norm = normalize_vector(thigh)
+
+            # Project thigh into pelvis frontal plane
+            thigh_in_pelvis = thigh_norm - np.dot(thigh_norm, pelvis_forward) * pelvis_forward
 
             # Adduction relative to pelvis
-            pelvis_up = np.cross(pelvis_forward, pelvis_right)
-            adduction_pelvis = -signed_angle_about_axis(-pelvis_up, thigh_frontal, pelvis_forward)
+            # UPLIFT convention: positive = toward midline
+            sign = 1 if side == 'right' else -1
+            adduction_pelvis = sign * np.degrees(np.arctan2(
+                np.dot(thigh_in_pelvis, pelvis_right),
+                -np.dot(thigh_in_pelvis, pelvis_up)
+            ))
             setattr(angles, f'{side}_hip_adduction_with_respect_to_pelvis', adduction_pelvis)
             setattr(angles, f'{side}_hip_internal_rotation_with_respect_to_pelvis', 0.0)  # Placeholder
 
@@ -529,11 +577,14 @@ class JointAngleCalculator3D:
             upper_arm = elbow - shoulder
 
             # Shoulder flexion (arm raised forward)
-            arm_sagittal = np.array([upper_arm[0], 0, upper_arm[2]])
-            flexion = np.degrees(np.arctan2(arm_sagittal[0], -arm_sagittal[2]))
+            # UPLIFT convention: positive = arm forward/up, use trunk reference
+            arm_in_trunk = upper_arm.copy()
+            # Project onto sagittal plane of trunk
+            flexion = np.degrees(np.arctan2(-arm_in_trunk[0], -arm_in_trunk[2]))
             setattr(angles, f'{side}_shoulder_flexion', flexion)
 
             # Shoulder adduction (negative of abduction)
+            # UPLIFT convention: positive = arm toward body
             abduction = angle_between_vectors(upper_arm, -torso_up) - 90
             setattr(angles, f'{side}_shoulder_adduction', -abduction)
             setattr(angles, f'{side}_shoulder_abduction', abduction)  # Legacy name
@@ -543,8 +594,10 @@ class JointAngleCalculator3D:
             setattr(angles, f'{side}_shoulder_rotation', 0.0)  # Legacy name
 
             # Shoulder horizontal adduction
+            # UPLIFT convention: positive = arm across body (toward midline)
             upper_arm_horiz = upper_arm.copy()
             upper_arm_horiz[2] = 0
+            # Negate to match UPLIFT sign convention
             h_add = -signed_angle_about_axis(torso_forward, upper_arm_horiz, np.array([0, 0, 1]))
             setattr(angles, f'{side}_shoulder_horizontal_adduction', h_add)
 
@@ -566,11 +619,12 @@ class JointAngleCalculator3D:
         torso_lateral_tilt_val = np.degrees(np.arcsin(np.clip(shoulder_axis[2] / shoulder_axis_len, -1, 1))) if shoulder_axis_len > 1e-6 else 0.0
 
         # Assign UPLIFT-named attributes
-        angles.pelvis_global_tilt = pelvis_obliquity
-        angles.pelvis_global_rotation = np.degrees(pelvis_angle - global_angle)
-        angles.trunk_global_flexion = torso_flexion_val
+        # Note: pelvis_rotation and torso_rotation already negated above
+        angles.pelvis_global_tilt = angles.pelvis_tilt  # Anterior/posterior tilt
+        angles.pelvis_global_rotation = angles.pelvis_rotation  # Use already-negated value
+        angles.trunk_global_flexion = angles.torso_flexion  # Forward lean
         angles.trunk_global_tilt = torso_lateral_tilt_val
-        angles.trunk_global_rotation = np.degrees(torso_angle - global_angle)
+        angles.trunk_global_rotation = angles.torso_rotation  # Use already-negated value
         angles.trunk_lateral_flexion_right = torso_lateral_tilt_val
 
         # Legacy names for backwards compatibility with dashboard
@@ -582,28 +636,41 @@ class JointAngleCalculator3D:
         angles.torso_lateral_tilt = torso_lateral_tilt_val
 
         # ===== CENTER OF MASS (simplified) =====
+        # UPLIFT convention: world coordinates with Z = height from ground
+        # Estimate ground level from minimum ankle height
+        left_ankle_pos = get('left_ankle')
+        right_ankle_pos = get('right_ankle')
+        ground_z = min(left_ankle_pos[2], right_ankle_pos[2])
+
         # Trunk COM: midpoint between hip center and shoulder center
         trunk_com = (hip_center + shoulder_center) / 2
-        angles.trunk_center_of_mass_x = trunk_com[0]
-        angles.trunk_center_of_mass_y = trunk_com[1]
-        angles.trunk_center_of_mass_z = trunk_com[2]
+        # Express relative to pelvis center for X/Y, absolute height for Z
+        angles.trunk_center_of_mass_x = trunk_com[0] - hip_center[0]
+        angles.trunk_center_of_mass_y = trunk_com[1] - hip_center[1]
+        # Z is height above ground (UPLIFT convention)
+        angles.trunk_center_of_mass_z = trunk_com[2] - ground_z
 
         # Whole body COM: weighted average of segment COMs (simplified)
         # Using just the major segments
         left_knee = get('left_knee')
         right_knee = get('right_knee')
-        left_ankle = get('left_ankle')
-        right_ankle = get('right_ankle')
 
-        leg_com = (left_knee + right_knee + left_ankle + right_ankle) / 4
+        leg_com = (left_knee + right_knee + left_ankle_pos + right_ankle_pos) / 4
         arm_com = (get('left_elbow') + get('right_elbow') + get('left_wrist') + get('right_wrist')) / 4
 
         # Weights: trunk ~50%, legs ~30%, arms ~10%, head ~10%
         head_pos = get('head')
         whole_body_com = 0.5 * trunk_com + 0.3 * leg_com + 0.1 * arm_com + 0.1 * head_pos
-        angles.whole_body_center_of_mass_x = whole_body_com[0]
-        angles.whole_body_center_of_mass_y = whole_body_com[1]
-        angles.whole_body_center_of_mass_z = whole_body_com[2]
+        # Express relative to pelvis for X/Y, height from ground for Z
+        angles.whole_body_center_of_mass_x = whole_body_com[0] - hip_center[0]
+        angles.whole_body_center_of_mass_y = whole_body_com[1] - hip_center[1]
+        angles.whole_body_center_of_mass_z = whole_body_com[2] - ground_z
+
+        # ===== 3D POSITIONS (UPLIFT format) =====
+        # Pelvis position (hip center)
+        angles.pelvis_3d_x = hip_center[0]
+        angles.pelvis_3d_y = hip_center[1]
+        angles.pelvis_3d_z = hip_center[2]
 
         return angles
 
@@ -611,7 +678,7 @@ class JointAngleCalculator3D:
 def calculate_angular_velocities_3d(angles_list: List[JointAngles3D],
                                     fps: float) -> List[dict]:
     """
-    Calculate angular velocities for all angles.
+    Calculate angular velocities for all angles using Savitzky-Golay filter.
 
     Args:
         angles_list: List of JointAngles3D over time
@@ -620,27 +687,57 @@ def calculate_angular_velocities_3d(angles_list: List[JointAngles3D],
     Returns:
         List of dictionaries with angular velocities (deg/s)
     """
+    from scipy.signal import savgol_filter
+
     dt = 1.0 / fps
-    velocities = []
+    n_frames = len(angles_list)
 
     # Get all angle attribute names
     angle_attrs = [attr for attr in dir(angles_list[0])
                    if not attr.startswith('_') and attr != 'timestamp']
 
-    for i, angles in enumerate(angles_list):
-        vel_dict = {'timestamp': angles.timestamp}
-
+    # Extract time series for each attribute
+    time_series = {attr: [] for attr in angle_attrs}
+    for angles in angles_list:
         for attr in angle_attrs:
             val = getattr(angles, attr)
-            if val is not None and i > 0:
-                prev_val = getattr(angles_list[i-1], attr)
-                if prev_val is not None:
-                    vel_dict[f'{attr}_velocity'] = (val - prev_val) / dt
-                else:
-                    vel_dict[f'{attr}_velocity'] = None
-            else:
-                vel_dict[f'{attr}_velocity'] = None
+            time_series[attr].append(val if val is not None else np.nan)
 
+    # Calculate smooth velocities using Savitzky-Golay filter
+    velocity_series = {}
+    window_length = min(7, n_frames if n_frames % 2 == 1 else n_frames - 1)
+    if window_length < 3:
+        window_length = 3
+
+    for attr, values in time_series.items():
+        values_arr = np.array(values, dtype=float)
+        if np.all(np.isnan(values_arr)):
+            velocity_series[attr] = [None] * n_frames
+        else:
+            # Interpolate NaN values
+            valid_mask = ~np.isnan(values_arr)
+            if np.sum(valid_mask) >= 2:
+                values_filled = np.interp(
+                    np.arange(n_frames),
+                    np.where(valid_mask)[0],
+                    values_arr[valid_mask]
+                )
+                if n_frames >= window_length:
+                    velocity_series[attr] = savgol_filter(
+                        values_filled, window_length, polyorder=2, deriv=1, delta=dt
+                    ).tolist()
+                else:
+                    velocity_series[attr] = np.gradient(values_filled, dt).tolist()
+            else:
+                velocity_series[attr] = [None] * n_frames
+
+    # Build output list
+    velocities = []
+    for i, angles in enumerate(angles_list):
+        vel_dict = {'timestamp': angles.timestamp}
+        for attr in angle_attrs:
+            vel = velocity_series[attr][i]
+            vel_dict[f'{attr}_velocity'] = vel
         velocities.append(vel_dict)
 
     return velocities
