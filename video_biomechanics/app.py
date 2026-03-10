@@ -53,7 +53,7 @@ UPLOAD_DIR = tempfile.mkdtemp()
 
 def create_upload_card(camera_num: int):
     """Create an upload card for a camera with video preview."""
-    label = "SIDE VIEW" if camera_num == 1 else "BACK VIEW"
+    label = "PRIMARY" if camera_num == 1 else "SECONDARY"
     return html.Div([
         html.Div(label, className="section-title mb-2"),
         html.Div([
@@ -465,18 +465,17 @@ app.layout = dbc.Container([
                             dcc.Dropdown(
                                 id='training-session-dropdown',
                                 placeholder="Select a training session...",
-                                style={'backgroundColor': '#1a1a2e', 'color': '#fff'}
+                                style={
+                                    'backgroundColor': '#1a1a2e',
+                                    'color': '#000',  # Black text for visibility
+                                }
                             ),
-                        ], width=8),
-                        dbc.Col([
-                            dbc.Button("Load Session", id='load-session-btn', color="primary",
-                                       outline=True, className="w-100", disabled=True)
-                        ], width=4),
+                        ], width=12),
                     ]),
                     html.Div(id='load-session-status', className="mt-2",
                              style={'color': '#666', 'fontSize': '0.85rem'})
-                ], className="glass-card", style={'padding': '16px'}),
-            ], className="mb-4"),
+                ], className="glass-card", style={'padding': '16px', 'position': 'relative', 'zIndex': 100}),
+            ], className="mb-4", style={'position': 'relative', 'zIndex': 100}),
 
             html.Div([
                 html.Hr(style={'borderColor': '#333', 'margin': '20px 0'}),
@@ -561,7 +560,7 @@ app.layout = dbc.Container([
                             html.Div("Angle between cameras (°)", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
                         ], width=3),
                         dbc.Col([
-                            html.Div("SIDE DISTANCE", className="metric-label mb-2"),
+                            html.Div("PRIMARY DISTANCE", className="metric-label mb-2"),
                             dbc.Input(
                                 id='camera-dist-1',
                                 type='number',
@@ -575,7 +574,7 @@ app.layout = dbc.Container([
                             html.Div("Distance in meters", style={'color': '#555', 'fontSize': '0.7rem', 'marginTop': '4px'})
                         ], width=3),
                         dbc.Col([
-                            html.Div("BACK DISTANCE", className="metric-label mb-2"),
+                            html.Div("SECONDARY DISTANCE", className="metric-label mb-2"),
                             dbc.Input(
                                 id='camera-dist-2',
                                 type='number',
@@ -717,7 +716,7 @@ app.layout = dbc.Container([
                                     controls=True,
                                     style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
                                 ),
-                                html.Div("SIDE VIEW", className="video-label")
+                                html.Div("PRIMARY", className="video-label")
                             ], className="video-container", id='video-thumb-1'),
                         ], width=6),
                         dbc.Col([
@@ -727,7 +726,7 @@ app.layout = dbc.Container([
                                     controls=True,
                                     style={'width': '100%', 'height': '100%', 'objectFit': 'cover'},
                                 ),
-                                html.Div("BACK VIEW", className="video-label")
+                                html.Div("SECONDARY", className="video-label")
                             ], className="video-container", id='video-thumb-2'),
                         ], width=6),
                     ], className="mb-4"),
@@ -1466,7 +1465,8 @@ def populate_training_sessions(_):
     for session_dir in sorted(training_dir.glob('session_*')):
         if session_dir.is_dir():
             # Check what files exist
-            has_videos = (session_dir / 'side.mp4').exists() or (session_dir / 'back.mp4').exists()
+            has_videos = (session_dir / 'primary.mp4').exists() or (session_dir / 'secondary.mp4').exists() or \
+                         (session_dir / 'side.mp4').exists() or (session_dir / 'back.mp4').exists()
             has_uplift = (session_dir / 'uplift.csv').exists()
             has_poses = (session_dir / 'poses_3d.npy').exists()
 
@@ -1482,14 +1482,6 @@ def populate_training_sessions(_):
 
 
 @callback(
-    Output('load-session-btn', 'disabled'),
-    Input('training-session-dropdown', 'value')
-)
-def enable_load_button(session):
-    return session is None
-
-
-@callback(
     [Output('load-session-status', 'children'),
      Output('uploaded-videos', 'data', allow_duplicate=True),
      Output('uplift-poses-data', 'data', allow_duplicate=True),
@@ -1497,38 +1489,61 @@ def enable_load_button(session):
      Output('upload-zone-1', 'style', allow_duplicate=True),
      Output('video-preview-1', 'style', allow_duplicate=True),
      Output('preview-player-1', 'src', allow_duplicate=True),
+     Output('upload-zone-2', 'style', allow_duplicate=True),
+     Output('video-preview-2', 'style', allow_duplicate=True),
+     Output('preview-player-2', 'src', allow_duplicate=True),
      Output('settings-section', 'style', allow_duplicate=True),
      Output('uplift-section', 'style', allow_duplicate=True),
      Output('data-source-toggle', 'options', allow_duplicate=True)],
-    Input('load-session-btn', 'n_clicks'),
-    [State('training-session-dropdown', 'value'),
-     State('uploaded-videos', 'data')],
+    Input('training-session-dropdown', 'value'),
+    State('uploaded-videos', 'data'),
     prevent_initial_call=True
 )
-def load_training_session(n_clicks, session_name, uploaded_videos):
+def load_training_session(session_name, uploaded_videos):
     """Load videos and UPLIFT data from a training session folder."""
-    if not n_clicks or not session_name:
+    if not session_name:
         raise PreventUpdate
 
     session_dir = Path('training_data') / session_name
 
     if not session_dir.exists():
         return (f"Session folder not found: {session_name}", uploaded_videos, None, True,
-                no_update, no_update, no_update, no_update, no_update, no_update)
+                no_update, no_update, no_update, no_update, no_update, no_update,
+                no_update, no_update, no_update)
 
-    # Find video files
-    video_files = list(session_dir.glob('*.mp4')) + list(session_dir.glob('*.mov'))
-    if not video_files:
+    # Find video files by name (primary/secondary preferred, fallback to side/back)
+    video1_path = None
+    video2_path = None
+
+    # Try primary/secondary naming first
+    for name in ['primary.mp4', 'side.mp4']:
+        candidate = session_dir / name
+        if candidate.exists():
+            video1_path = str(candidate)
+            break
+
+    for name in ['secondary.mp4', 'back.mp4']:
+        candidate = session_dir / name
+        if candidate.exists():
+            video2_path = str(candidate)
+            break
+
+    # Fallback to any video files if named files not found
+    if not video1_path:
+        video_files = list(session_dir.glob('*.mp4')) + list(session_dir.glob('*.mov'))
+        if video_files:
+            video1_path = str(video_files[0])
+            if len(video_files) > 1:
+                video2_path = str(video_files[1])
+
+    if not video1_path:
         return (f"No video files found in {session_name}", uploaded_videos, None, True,
-                no_update, no_update, no_update, no_update, no_update, no_update)
+                no_update, no_update, no_update, no_update, no_update, no_update,
+                no_update, no_update, no_update)
 
-    # Load first video
-    video_path = str(video_files[0])
-    uploaded_videos['video1'] = video_path
-
-    # Load second video if present
-    if len(video_files) > 1:
-        uploaded_videos['video2'] = str(video_files[1])
+    uploaded_videos['video1'] = video1_path
+    if video2_path:
+        uploaded_videos['video2'] = video2_path
 
     # Find UPLIFT CSV
     uplift_poses = None
@@ -1563,14 +1578,25 @@ def load_training_session(n_clicks, session_name, uploaded_videos):
         except Exception as e:
             print(f"Failed to load UPLIFT data: {e}")
 
-    # Generate video preview URL
+    # Generate video preview URLs for both videos
+    video1_src = ""
+    video2_src = ""
+
     try:
         import base64
-        with open(video_path, 'rb') as f:
+        with open(video1_path, 'rb') as f:
             video_data = base64.b64encode(f.read()).decode('utf-8')
-            video_src = f"data:video/mp4;base64,{video_data}"
+            video1_src = f"data:video/mp4;base64,{video_data}"
     except Exception:
-        video_src = ""
+        pass
+
+    if video2_path:
+        try:
+            with open(video2_path, 'rb') as f:
+                video_data = base64.b64encode(f.read()).decode('utf-8')
+                video2_src = f"data:video/mp4;base64,{video_data}"
+        except Exception:
+            pass
 
     # Update data source toggle options
     if uplift_poses:
@@ -1584,9 +1610,10 @@ def load_training_session(n_clicks, session_name, uploaded_videos):
             {'label': ' UPLIFT', 'value': 'uplift', 'disabled': True}
         ]
 
+    n_videos = 1 + (1 if video2_path else 0)
     status = html.Div([
         html.I(className="fas fa-check-circle", style={'color': '#4ade80', 'marginRight': '8px'}),
-        html.Span(f"Loaded {session_name} ({len(video_files)} video(s)" +
+        html.Span(f"Loaded {session_name} ({n_videos} video(s)" +
                   (f", UPLIFT data" if uplift_poses else "") + ")",
                   style={'color': '#4ade80'})
     ])
@@ -1596,9 +1623,12 @@ def load_training_session(n_clicks, session_name, uploaded_videos):
         uploaded_videos,
         uplift_poses,
         False,  # Enable process button
-        {'display': 'none'},  # Hide upload zone
-        {'display': 'block'},  # Show video preview
-        video_src,
+        {'display': 'none'},  # Hide upload zone 1
+        {'display': 'block'},  # Show video preview 1
+        video1_src,
+        {'display': 'none'} if video2_path else no_update,  # Hide upload zone 2
+        {'display': 'block'} if video2_path else no_update,  # Show video preview 2
+        video2_src if video2_path else no_update,
         {'display': 'block'},  # Show settings
         {'display': 'block'},  # Show UPLIFT section
         toggle_options
@@ -2116,21 +2146,14 @@ def render_tab_with_skeleton(active_tab, results, frame_idx, events_dict, upload
         if np.all(np.abs(pose[10]) < max_reasonable):
             last_good_head = pose[10].copy()
 
-        # Fix coordinate system for Three.js viewer (Y-up)
+        # Simple coordinate transform for Three.js viewer
         fixed = np.zeros_like(pose)
-        if using_uplift:
-            # UPLIFT data is already Y-up, just use as-is with minor adjustments
-            fixed[:, 0] = pose[:, 0]   # X as-is
-            fixed[:, 1] = pose[:, 1]   # Y is vertical (up)
-            fixed[:, 2] = -pose[:, 2]  # Flip Z so skeleton faces camera
-        else:
-            # Processed data needs coordinate transformation
-            fixed[:, 0] = -pose[:, 0]  # Flip X for mirror effect
-            fixed[:, 1] = pose[:, 1]   # Y as vertical
-            fixed[:, 2] = -pose[:, 2]  # Flip Z for camera direction
+        fixed[:, 0] = pose[:, 0]      # X stays X
+        fixed[:, 1] = pose[:, 2]      # Z becomes Y (vertical in Three.js)
+        fixed[:, 2] = -pose[:, 1]     # -Y becomes Z (depth)
 
-        # Floor the skeleton (shift Y so minimum is at ground level)
-        fixed[:, 1] = fixed[:, 1] - fixed[:, 1].min() + 0.02
+        # Floor the skeleton (shift Z so minimum is at ground level)
+        fixed[:, 2] = fixed[:, 2] - fixed[:, 2].min() + 0.02
         fixed_poses.append(fixed.tolist())
 
     # Get graphs for the active tab
@@ -2852,11 +2875,11 @@ def save_training_data(n_clicks, results_data, uploaded_videos, uplift_poses):
     session_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Copy video files
+        # Copy video files (use primary/secondary naming)
         if uploaded_videos.get('video1'):
-            shutil.copy(uploaded_videos['video1'], session_dir / 'side.mp4')
+            shutil.copy(uploaded_videos['video1'], session_dir / 'primary.mp4')
         if uploaded_videos.get('video2'):
-            shutil.copy(uploaded_videos['video2'], session_dir / 'back.mp4')
+            shutil.copy(uploaded_videos['video2'], session_dir / 'secondary.mp4')
 
         # Copy UPLIFT CSV if available
         if uploaded_videos.get('uplift_csv'):

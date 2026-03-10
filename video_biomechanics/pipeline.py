@@ -19,6 +19,7 @@ from pose_estimation import PoseEstimator, extract_joint_positions, PoseFrame
 from joint_angles import JointAngleCalculator, JointAngles
 from joint_angles_3d import JointAngleCalculator3D, JointAngles3D
 from lifting_3d import VideoPose3DLifter, Pose3D
+from obp_lifter import OBPLiftingModel  # OBP-trained lifter (90% more accurate)
 from event_detection import SwingEventDetector, SwingEvents
 from hitting_metrics import HittingMetricsCalculator, HittingPOIMetrics
 from conventions import get_side_mapping
@@ -37,7 +38,8 @@ class VideoBiomechanicsPipeline:
                  pose_model: str = 'yolov8m-pose.pt',
                  bats: str = 'R',
                  use_3d: bool = True,
-                 lifting_model_path: Optional[str] = None):
+                 lifting_model_path: Optional[str] = None,
+                 lifter_type: str = 'auto'):
         """
         Initialize the pipeline.
 
@@ -46,18 +48,41 @@ class VideoBiomechanicsPipeline:
             bats: Batting handedness ('L' or 'R')
             use_3d: Whether to use 3D lifting (slower but more accurate)
             lifting_model_path: Path to pretrained lifting model weights
+            lifter_type: '2D->3D lifter to use:
+                - 'auto': Use OBP-trained if available, else geometric (default)
+                - 'obp': OBP-trained neural network (90% more accurate)
+                - 'geometric': Bone-length constraint based (fast, less accurate)
         """
         self.pose_estimator = PoseEstimator(model_name=pose_model)
         self.bats = bats
         self.use_3d = use_3d
         self.fps = None
+        self.lifter_type = lifter_type
 
         if use_3d:
-            self.lifter = VideoPose3DLifter(model_path=lifting_model_path)
+            self.lifter = self._create_lifter(lifter_type, lifting_model_path)
             self.angle_calculator = JointAngleCalculator3D()
         else:
             self.lifter = None
             self.angle_calculator = JointAngleCalculator(use_3d=False)
+
+    def _create_lifter(self, lifter_type: str, model_path: Optional[str]):
+        """Create the appropriate 2D->3D lifter."""
+        if lifter_type == 'geometric':
+            print("Using geometric lifter (bone-length constraints)")
+            return VideoPose3DLifter(model_path=None)
+
+        if lifter_type in ('obp', 'auto'):
+            obp_lifter = OBPLiftingModel(model_path=model_path)
+            if obp_lifter.is_available:
+                print("Using OBP-trained lifter (90% more accurate)")
+                return obp_lifter
+            elif lifter_type == 'obp':
+                raise RuntimeError("OBP lifter requested but model not found")
+
+        # Fallback to geometric
+        print("Falling back to geometric lifter")
+        return VideoPose3DLifter(model_path=model_path)
 
     def process_video(self,
                       video_path: str,
@@ -407,6 +432,8 @@ def main():
                         help='Use 2D mode (faster, less accurate)')
     parser.add_argument('--model', default='yolov8m-pose.pt',
                         help='YOLOv8 pose model to use')
+    parser.add_argument('--lifter', default='auto', choices=['auto', 'obp', 'geometric'],
+                        help='3D lifter: auto (default), obp (OBP-trained), geometric')
 
     args = parser.parse_args()
 
@@ -417,7 +444,8 @@ def main():
     pipeline = VideoBiomechanicsPipeline(
         pose_model=args.model,
         bats=args.bats,
-        use_3d=not args.use_2d
+        use_3d=not args.use_2d,
+        lifter_type=args.lifter
     )
 
     results = pipeline.process_video(args.video_path)

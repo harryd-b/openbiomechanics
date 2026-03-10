@@ -7,11 +7,25 @@
 video_biomechanics/training_data/
 video_biomechanics/tmp/
 video_biomechanics/models/
+video_biomechanics/calibration/models/
+video_biomechanics/.venv/
 yolov8m-pose.pt
 *.pt
+*.pth
+*.onnx
 __pycache__/
 *.pyc
 .claude/
+
 # Exclude large training artifacts
 video_biomechanics/ml/plate_detector/synthetic_images/
 video_biomechanics/ml/plate_detector/checkpoints/
+video_biomechanics/ml/bat_detector/synthetic_images/
+video_biomechanics/ml/bat_detector/checkpoints/
+
+# OBP training data (large motion capture files)
+*.c3d
+*.trc
+*.mot
+*.parquet
+training_cache*.pkl

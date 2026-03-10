@@ -1,0 +1,1476 @@
+{
+  "version": "1.0",
+  "type": "bat_annotations",
+  "annotations": [
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 589,
+      "endpoints": [
+        [
+          74,
+          538
+        ],
+        [
+          -78,
+          558
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 447,
+      "endpoints": [
+        [
+          -19,
+          527
+        ],
+        [
+          206,
+          396
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 715,
+      "endpoints": [
+        [
+          224,
+          471
+        ],
+        [
+          133,
+          152
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 592,
+      "endpoints": [
+        [
+          70,
+          531
+        ],
+        [
+          -64,
+          586
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 714,
+      "endpoints": [
+        [
+          222,
+          470
+        ],
+        [
+          122,
+          157
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 470,
+      "endpoints": [
+        [
+          -29,
+          565
+        ],
+        [
+          160,
+          413
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\primary.mp4",
+      "frame_idx": 709,
+      "endpoints": [
+        [
+          216,
+          458
+        ],
+        [
+          70,
+          182
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_010\\secondary.mp4",
+      "frame_idx": 602,
+      "endpoints": [
+        [
+          381,
+          513
+        ],
+        [
+          346,
+          391
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_010\\secondary.mp4",
+      "frame_idx": 468,
+      "endpoints": [
+        [
+          405,
+          479
+        ],
+        [
+          412,
+          425
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_010\\secondary.mp4",
+      "frame_idx": 590,
+      "endpoints": [
+        [
+          368,
+          521
+        ],
+        [
+          320,
+          402
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_010\\secondary.mp4",
+      "frame_idx": 701,
+      "endpoints": [
+        [
+          528,
+          507
+        ],
+        [
+          650,
+          355
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 533,
+      "endpoints": [
+        [
+          124,
+          576
+        ],
+        [
+          62,
+          558
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 427,
+      "endpoints": [
+        [
+          130,
+          602
+        ],
+        [
+          268,
+          497
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 595,
+      "endpoints": [
+        [
+          70,
+          596
+        ],
+        [
+          191,
+          601
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 510,
+      "endpoints": [
+        [
+          229,
+          553
+        ],
+        [
+          25,
+          556
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 475,
+      "endpoints": [
+        [
+          365,
+          625
+        ],
+        [
+          527,
+          588
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\secondary.mp4",
+      "frame_idx": 522,
+      "endpoints": [
+        [
+          171,
+          564
+        ],
+        [
+          0,
+          554
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\secondary.mp4",
+      "frame_idx": 600,
+      "endpoints": [
+        [
+          632,
+          597
+        ],
+        [
+          532,
+          814
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\secondary.mp4",
+      "frame_idx": 712,
+      "endpoints": [
+        [
+          620,
+          495
+        ],
+        [
+          722,
+          425
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\secondary.mp4",
+      "frame_idx": 574,
+      "endpoints": [
+        [
+          583,
+          637
+        ],
+        [
+          422,
+          812
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\secondary.mp4",
+      "frame_idx": 488,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_005\\secondary.mp4",
+      "frame_idx": 712,
+      "endpoints": [
+        [
+          471,
+          441
+        ],
+        [
+          433,
+          172
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\secondary.mp4",
+      "frame_idx": 588,
+      "endpoints": [
+        [
+          254,
+          534
+        ],
+        [
+          254,
+          534
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\secondary.mp4",
+      "frame_idx": 714,
+      "endpoints": [
+        [
+          474,
+          450
+        ],
+        [
+          451,
+          184
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_005\\secondary.mp4",
+      "frame_idx": 589,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 208,
+      "endpoints": [
+        [
+          230,
+          639
+        ],
+        [
+          222,
+          443
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 14,
+      "endpoints": [
+        [
+          237,
+          616
+        ],
+        [
+          238,
+          431
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          238,
+          616
+        ],
+        [
+          237,
+          435
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 219,
+      "endpoints": [
+        [
+          227,
+          628
+        ],
+        [
+          220,
+          444
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 111,
+      "endpoints": [
+        [
+          238,
+          622
+        ],
+        [
+          229,
+          439
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 556,
+      "endpoints": [
+        [
+          314,
+          523
+        ],
+        [
+          227,
+          674
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\secondary.mp4",
+      "frame_idx": 375,
+      "endpoints": [
+        [
+          211,
+          604
+        ],
+        [
+          254,
+          430
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 543,
+      "endpoints": [
+        [
+          520,
+          641
+        ],
+        [
+          479,
+          802
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 657,
+      "endpoints": [
+        [
+          417,
+          554
+        ],
+        [
+          552,
+          565
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 384,
+      "endpoints": [
+        [
+          413,
+          607
+        ],
+        [
+          370,
+          495
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 556,
+      "endpoints": [
+        [
+          516,
+          649
+        ],
+        [
+          466,
+          815
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 455,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 432,
+      "endpoints": [
+        [
+          231,
+          591
+        ],
+        [
+          135,
+          546
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_004\\primary.mp4",
+      "frame_idx": 532,
+      "endpoints": [
+        [
+          520,
+          626
+        ],
+        [
+          512,
+          786
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 126,
+      "endpoints": [
+        [
+          367,
+          398
+        ],
+        [
+          155,
+          475
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 14,
+      "endpoints": [
+        [
+          364,
+          402
+        ],
+        [
+          147,
+          503
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 189,
+      "endpoints": [
+        [
+          364,
+          410
+        ],
+        [
+          169,
+          374
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          364,
+          402
+        ],
+        [
+          154,
+          510
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 1,
+      "endpoints": [
+        [
+          365,
+          400
+        ],
+        [
+          152,
+          510
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\primary.mp4",
+      "frame_idx": 63,
+      "endpoints": [
+        [
+          369,
+          399
+        ],
+        [
+          153,
+          505
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\primary.mp4",
+      "frame_idx": 582,
+      "endpoints": [
+        [
+          248,
+          571
+        ],
+        [
+          426,
+          579
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\primary.mp4",
+      "frame_idx": 551,
+      "endpoints": [
+        [
+          212,
+          557
+        ],
+        [
+          448,
+          554
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_007\\primary.mp4",
+      "frame_idx": 449,
+      "endpoints": [
+        [
+          418,
+          634
+        ],
+        [
+          241,
+          552
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 408,
+      "endpoints": [
+        [
+          469,
+          561
+        ],
+        [
+          345,
+          474
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 381,
+      "endpoints": [
+        [
+          507,
+          558
+        ],
+        [
+          343,
+          423
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 464,
+      "endpoints": [
+        [
+          245,
+          591
+        ],
+        [
+          161,
+          564
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 422,
+      "endpoints": [
+        [
+          380,
+          621
+        ],
+        [
+          420,
+          516
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 357,
+      "endpoints": [
+        [
+          514,
+          579
+        ],
+        [
+          359,
+          412
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 448,
+      "endpoints": [
+        [
+          224,
+          621
+        ],
+        [
+          29,
+          690
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\primary.mp4",
+      "frame_idx": 309,
+      "endpoints": [
+        [
+          480,
+          575
+        ],
+        [
+          379,
+          417
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\primary.mp4",
+      "frame_idx": 419,
+      "endpoints": [
+        [
+          104,
+          493
+        ],
+        [
+          100,
+          416
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\primary.mp4",
+      "frame_idx": 379,
+      "endpoints": [
+        [
+          129,
+          503
+        ],
+        [
+          -2,
+          417
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\primary.mp4",
+      "frame_idx": 407,
+      "endpoints": [
+        [
+          102,
+          486
+        ],
+        [
+          12,
+          370
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 101,
+      "endpoints": [
+        [
+          77,
+          587
+        ],
+        [
+          126,
+          253
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 405,
+      "endpoints": [
+        [
+          45,
+          540
+        ],
+        [
+          196,
+          305
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 15,
+      "endpoints": [
+        [
+          84,
+          577
+        ],
+        [
+          102,
+          242
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 26,
+      "endpoints": [
+        [
+          84,
+          573
+        ],
+        [
+          99,
+          242
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 303,
+      "endpoints": [
+        [
+          9,
+          586
+        ],
+        [
+          103,
+          247
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_008\\primary.mp4",
+      "frame_idx": 7,
+      "endpoints": [
+        [
+          84,
+          579
+        ],
+        [
+          104,
+          243
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 461,
+      "endpoints": [
+        [
+          636,
+          214
+        ],
+        [
+          830,
+          132
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 710,
+      "endpoints": [
+        [
+          546,
+          374
+        ],
+        [
+          353,
+          479
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 714,
+      "endpoints": [
+        [
+          544,
+          368
+        ],
+        [
+          335,
+          458
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 621,
+      "endpoints": [
+        [
+          710,
+          300
+        ],
+        [
+          959,
+          343
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 533,
+      "endpoints": [
+        [
+          646,
+          209
+        ],
+        [
+          849,
+          133
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\primary.mp4",
+      "frame_idx": 715,
+      "endpoints": [
+        [
+          551,
+          368
+        ],
+        [
+          323,
+          456
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\secondary.mp4",
+      "frame_idx": 131,
+      "endpoints": [
+        [
+          597,
+          178
+        ],
+        [
+          378,
+          80
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\secondary.mp4",
+      "frame_idx": 39,
+      "endpoints": [
+        [
+          597,
+          151
+        ],
+        [
+          353,
+          95
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\secondary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          593,
+          145
+        ],
+        [
+          346,
+          87
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\secondary.mp4",
+      "frame_idx": 1,
+      "endpoints": [
+        [
+          593,
+          145
+        ],
+        [
+          346,
+          87
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 493,
+      "endpoints": [
+        [
+          589,
+          545
+        ],
+        [
+          721,
+          382
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 490,
+      "endpoints": [
+        [
+          590,
+          543
+        ],
+        [
+          724,
+          405
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 497,
+      "endpoints": [
+        [
+          585,
+          543
+        ],
+        [
+          693,
+          376
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 502,
+      "endpoints": [
+        [
+          578,
+          546
+        ],
+        [
+          630,
+          402
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 418,
+      "endpoints": [
+        [
+          368,
+          591
+        ],
+        [
+          547,
+          480
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_003\\secondary.mp4",
+      "frame_idx": 466,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_006\\secondary.mp4",
+      "frame_idx": 257,
+      "endpoints": [
+        [
+          67,
+          501
+        ],
+        [
+          259,
+          362
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_006\\secondary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_006\\secondary.mp4",
+      "frame_idx": 65,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_009\\secondary.mp4",
+      "frame_idx": 471,
+      "endpoints": [
+        [
+          124,
+          556
+        ],
+        [
+          0,
+          618
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\secondary.mp4",
+      "frame_idx": 373,
+      "endpoints": [
+        [
+          371,
+          528
+        ],
+        [
+          360,
+          457
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\secondary.mp4",
+      "frame_idx": 301,
+      "endpoints": [
+        [
+          202,
+          706
+        ],
+        [
+          162,
+          577
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_009\\secondary.mp4",
+      "frame_idx": 349,
+      "endpoints": [
+        [
+          422,
+          604
+        ],
+        [
+          600,
+          541
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\secondary.mp4",
+      "frame_idx": 1,
+      "endpoints": [
+        [
+          605,
+          174
+        ],
+        [
+          389,
+          92
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_002\\secondary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          606,
+          173
+        ],
+        [
+          389,
+          90
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\primary.mp4",
+      "frame_idx": 605,
+      "endpoints": [
+        [
+          280,
+          498
+        ],
+        [
+          88,
+          530
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\primary.mp4",
+      "frame_idx": 716,
+      "endpoints": [
+        [
+          273,
+          515
+        ],
+        [
+          86,
+          533
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_001\\primary.mp4",
+      "frame_idx": 717,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_001\\primary.mp4",
+      "frame_idx": 715,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_001\\primary.mp4",
+      "frame_idx": 494,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_010\\primary.mp4",
+      "frame_idx": 0,
+      "endpoints": [
+        [
+          196,
+          361
+        ],
+        [
+          184,
+          334
+        ]
+      ],
+      "visible": true
+    },
+    {
+      "video_path": "session_010\\primary.mp4",
+      "frame_idx": 7,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_010\\primary.mp4",
+      "frame_idx": 5,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    },
+    {
+      "video_path": "session_010\\primary.mp4",
+      "frame_idx": 14,
+      "endpoints": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "visible": false
+    }
+  ]
+}
